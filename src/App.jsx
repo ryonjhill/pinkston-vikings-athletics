@@ -1,0 +1,1217 @@
+
+import { useState, useEffect, useRef, useCallback } from "react";
+import { initializeApp } from "firebase/app";
+import {
+  getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
+  onAuthStateChanged, signOut
+} from "firebase/auth";
+import {
+  getFirestore, collection, doc, addDoc, setDoc, getDoc, getDocs,
+  updateDoc, deleteDoc, query, where, orderBy, onSnapshot,
+  serverTimestamp, limit
+} from "firebase/firestore";
+import {
+  getStorage, ref, uploadBytes, getDownloadURL
+} from "firebase/storage";
+
+// ─── FIREBASE CONFIG ──────────────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyB--lmmPax6pMWaLxeF9QZG9ICw8iVJ7fo",
+  authDomain: "pinkston-vikings.firebaseapp.com",
+  projectId: "pinkston-vikings",
+  storageBucket: "pinkston-vikings.firebasestorage.app",
+  messagingSenderId: "745116012580",
+  appId: "1:745116012580:web:524e7ccecb9e81c33c88b1"
+};
+
+const firebaseApp = initializeApp(firebaseConfig);
+const auth = getAuth(firebaseApp);
+const db = getFirestore(firebaseApp);
+const storage = getStorage(firebaseApp);
+
+// ─── CONSTANTS ────────────────────────────────────────────────────────────────
+const SPORTS = [
+  {key:'Football',icon:'🏈'},{key:"Men's Basketball",icon:'🏀'},
+  {key:"Women's Basketball",icon:'🏀'},{key:'Baseball',icon:'⚾'},
+  {key:'Softball',icon:'🥎'},{key:"Men's Track",icon:'🏃'},
+  {key:"Women's Track",icon:'🏃'},{key:"Men's Soccer",icon:'⚽'},
+  {key:"Women's Soccer",icon:'⚽'},{key:'Volleyball',icon:'🏐'},
+  {key:'Wrestling',icon:'🤼'},{key:'Swimming',icon:'🏊'},
+  {key:'Tennis',icon:'🎾'},{key:'Golf',icon:'⛳'},
+];
+const PHOTO_CATS = ['Game Action','Team Photos','Events & Banners','Alumni Gallery'];
+const AUDIENCE_OPTS = [
+  {val:'all',label:'Everyone'},
+  {val:'athletes_parents',label:'Athletes & Parents'},
+  {val:'coaches',label:'Coaches Only'},
+  {val:'fans_alumni',label:'Fans & Alumni'},
+];
+const INJURY_TYPES = ['Sprain','Strain','Fracture','Concussion','Bruise','Laceration','Overuse','Other'];
+const INJURY_STATUS = ['Active','Recovering','Cleared'];
+
+// ─── THEME ────────────────────────────────────────────────────────────────────
+const G = {
+  black:'#0d0d0d',blackMid:'#1a1a1a',
+  gold:'#c9961a',goldLight:'#e5b02a',goldPale:'#fdf3d8',
+  white:'#fff',off:'#f2f0ec',muted:'#888',
+  red:'#c0392b',green:'#1a6636',greenBg:'#e6f4ec',redBg:'#fce8e8',
+  blue:'#1e40af',blueBg:'#dbeafe',
+  orange:'#c2410c',orangeBg:'#fff7ed',
+  purple:'#6b21a8',purpleBg:'#f3e8ff',
+};
+
+const s = {
+  page:{background:G.off,minHeight:'100vh',fontFamily:"'Source Sans 3',sans-serif",color:G.black},
+  header:{background:G.black,position:'relative',overflow:'hidden'},
+  headerInner:{display:'flex',alignItems:'center',gap:18,padding:'22px 24px 18px'},
+  mascot:{width:64,height:64,objectFit:'contain',flexShrink:0},
+  schoolName:{fontFamily:"'Oswald',sans-serif",fontSize:10,letterSpacing:'2.5px',textTransform:'uppercase',color:G.gold,marginBottom:4},
+  teamName:{fontFamily:"'Oswald',sans-serif",fontSize:32,fontWeight:700,color:G.white,lineHeight:1,letterSpacing:1},
+  tagline:{fontSize:12,color:'rgba(255,255,255,0.4)',marginTop:3},
+  goldBar:{height:3,background:`linear-gradient(90deg,${G.gold},${G.goldLight},${G.gold})`},
+  nav:{background:G.blackMid,display:'flex',overflowX:'auto',borderBottom:`1px solid rgba(201,150,26,0.2)`},
+  navBtn:(a)=>({fontFamily:"'Oswald',sans-serif",fontSize:12,fontWeight:500,letterSpacing:'1.5px',textTransform:'uppercase',color:a?G.gold:'rgba(255,255,255,0.45)',padding:'13px 16px',border:'none',background:'transparent',cursor:'pointer',whiteSpace:'nowrap',borderBottom:a?`2px solid ${G.gold}`:'2px solid transparent',position:'relative'}),
+  content:{padding:'20px 20px 48px'},
+  card:{background:G.white,borderRadius:10,border:`0.5px solid rgba(0,0,0,0.08)`,padding:'16px 18px',marginBottom:12},
+  cardTitle:{fontFamily:"'Oswald',sans-serif",fontSize:13,fontWeight:600,letterSpacing:'1px',textTransform:'uppercase',color:G.black,marginBottom:14},
+  pageHeader:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20,flexWrap:'wrap',gap:10},
+  pageTitle:{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:600,color:G.black,letterSpacing:'0.5px'},
+  pageSub:{fontSize:13,color:G.muted,marginLeft:8},
+  btn:(v='primary')=>{const m={primary:{background:G.black,color:G.gold},gold:{background:G.gold,color:G.black},outline:{background:'transparent',border:`0.5px solid rgba(0,0,0,0.2)`,color:G.black},danger:{background:G.redBg,color:G.red,border:`0.5px solid rgba(192,57,43,0.2)`},green:{background:G.greenBg,color:G.green,border:`0.5px solid rgba(26,102,54,0.2)`}};return{fontFamily:"'Oswald',sans-serif",fontSize:13,fontWeight:500,letterSpacing:'1px',textTransform:'uppercase',padding:'10px 20px',borderRadius:7,cursor:'pointer',border:'none',...(m[v]||m.primary)};},
+  btnSm:{padding:'6px 12px',fontSize:11},
+  input:{width:'100%',padding:'9px 12px',border:`0.5px solid rgba(0,0,0,0.18)`,borderRadius:7,fontFamily:"'Source Sans 3',sans-serif",fontSize:14,color:G.black,background:G.white,outline:'none'},
+  label:{fontSize:12,fontWeight:500,color:G.muted,textTransform:'uppercase',letterSpacing:'0.8px',display:'block',marginBottom:5},
+  badge:(role)=>{const m={admin:{background:'#f0fdf4',color:'#166534'},coach:{background:G.goldPale,color:'#92640a'},athlete:{background:G.blueBg,color:G.blue},parent:{background:G.purpleBg,color:G.purple},fan:{background:'#fce7f3',color:'#9d174d'},alumni:{background:'#fff7ed',color:'#9a3412'},approved:{background:G.greenBg,color:G.green},pending:{background:'#fef9c3',color:'#854d0e'},Active:{background:G.redBg,color:G.red},Recovering:{background:G.orangeBg,color:G.orange},Cleared:{background:G.greenBg,color:G.green}};const st=m[role]||{background:G.off,color:G.muted};return{display:'inline-block',fontFamily:"'Oswald',sans-serif",fontSize:10,letterSpacing:'0.8px',textTransform:'uppercase',padding:'2px 7px',borderRadius:4,...st};},
+  pill:(a)=>({fontFamily:"'Oswald',sans-serif",fontSize:11,letterSpacing:'1px',textTransform:'uppercase',padding:'5px 14px',borderRadius:20,border:`0.5px solid ${a?G.black:'rgba(0,0,0,0.12)'}`,background:a?G.black:G.white,cursor:'pointer',color:a?G.gold:G.muted}),
+  statGrid:{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:16},
+  statBlock:{background:G.white,borderRadius:10,border:`0.5px solid rgba(0,0,0,0.08)`,padding:'14px 12px 12px',textAlign:'center'},
+  statNum:{fontFamily:"'Oswald',sans-serif",fontSize:28,fontWeight:700,color:G.black,lineHeight:1},
+  statLbl:{fontSize:11,color:G.muted,marginTop:4,textTransform:'uppercase',letterSpacing:'0.8px'},
+};
+
+// ─── SHARED COMPONENTS ────────────────────────────────────────────────────────
+function Badge({role,children}){return <span style={s.badge(role)}>{children||role}</span>;}
+function Btn({variant='primary',sm,onClick,children,style={},disabled=false}){return <button disabled={disabled} style={{...s.btn(variant),...(sm?s.btnSm:{}),...style,opacity:disabled?0.5:1}} onClick={onClick}>{children}</button>;}
+function Card({children,style={}}){return <div style={{...s.card,...style}}>{children}</div>;}
+function CardTitle({children}){return <div style={s.cardTitle}>{children}</div>;}
+function FilterBar({cats,active,onChange}){return <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap'}}>{cats.map(c=><button key={c} style={s.pill(active===c)} onClick={()=>onChange(c)}>{c}</button>)}</div>;}
+function StatGrid({stats}){return <div style={s.statGrid}>{stats.map(({num,lbl,color})=><div key={lbl} style={s.statBlock}><div style={{...s.statNum,color:color||G.black}}>{num}</div><div style={s.statLbl}>{lbl}</div></div>)}</div>;}
+function Spinner(){return <div style={{display:'flex',alignItems:'center',justifyContent:'center',padding:40}}><div style={{width:32,height:32,border:`3px solid ${G.off}`,borderTop:`3px solid ${G.gold}`,borderRadius:'50%',animation:'spin 0.8s linear infinite'}}/><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>;}
+function Empty({msg='No data yet.'}){return <div style={{color:G.muted,fontSize:13,padding:'16px 0',textAlign:'center'}}>{msg}</div>;}
+
+function GameBadge({b}){
+  const m={home:{background:G.black,color:G.gold},away:{background:G.off,color:G.black,border:`0.5px solid rgba(0,0,0,0.1)`},win:{background:G.greenBg,color:G.green},loss:{background:G.redBg,color:G.red}};
+  const l={home:'Home',away:'Away',win:'W',loss:'L'};
+  return <span style={{fontFamily:"'Oswald',sans-serif",fontSize:11,fontWeight:500,letterSpacing:'0.8px',padding:'3px 8px',borderRadius:4,whiteSpace:'nowrap',...(m[b]||m.away)}}>{l[b]||b}</span>;
+}
+
+function GameItem({g,showLive=false}){
+  return <div style={{display:'flex',alignItems:'center',gap:12,padding:'12px 0',borderBottom:`0.5px solid ${G.off}`}}>
+    <div style={{width:42,textAlign:'center',flexShrink:0}}>
+      <div style={{fontSize:10,fontWeight:600,textTransform:'uppercase',color:G.gold,letterSpacing:'1px',lineHeight:1}}>{g.month}</div>
+      <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,color:G.black,lineHeight:1.1}}>{g.day}</div>
+    </div>
+    <div style={{flex:1,minWidth:0}}>
+      <div style={{fontWeight:600,fontSize:14,color:G.black}}>{g.opponent}</div>
+      <div style={{fontSize:12,color:G.muted,marginTop:2}}>{g.sport?`${g.sport} · `:''}{ g.details}</div>
+      {showLive&&g.liveScore?.live&&<div style={{display:'flex',alignItems:'center',gap:6,marginTop:4}}>
+        <span style={{background:G.red,color:'#fff',fontSize:9,fontFamily:"'Oswald',sans-serif",fontWeight:700,padding:'1px 6px',borderRadius:4,letterSpacing:'1px'}}>● LIVE</span>
+        <span style={{fontFamily:"'Oswald',sans-serif",fontSize:14,fontWeight:700,color:G.black}}>Vikings {g.liveScore.us} – {g.liveScore.them}</span>
+        <span style={{fontSize:11,color:G.muted}}>{g.liveScore.quarter}</span>
+      </div>}
+    </div>
+    <GameBadge b={g.badge}/>
+  </div>;
+}
+
+function AnnItem({ann}){
+  return <div style={{display:'flex',gap:14,padding:'12px 0',borderBottom:`0.5px solid ${G.off}`}}>
+    <div style={{width:8,height:8,borderRadius:'50%',background:G.gold,flexShrink:0,marginTop:5}}/>
+    <div style={{flex:1}}>
+      <div style={{fontWeight:600,fontSize:14,color:G.black,marginBottom:2}}>{ann.title}</div>
+      <div style={{fontSize:13,color:'#555',lineHeight:1.5}}>{ann.body}</div>
+      <div style={{fontSize:11,color:G.muted,marginTop:3}}>{ann.date} · {ann.coach}</div>
+    </div>
+  </div>;
+}
+
+function Modal({title,onClose,children}){
+  return <div onClick={e=>{if(e.target===e.currentTarget)onClose();}} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:500,display:'flex',alignItems:'center',justifyContent:'center'}}>
+    <div style={{background:G.white,borderRadius:12,padding:24,width:'90%',maxWidth:460,maxHeight:'88vh',overflowY:'auto'}}>
+      <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:600,color:G.black,marginBottom:16}}>{title}</div>
+      {children}
+    </div>
+  </div>;
+}
+
+function Toast({msg}){
+  return <div style={{position:'fixed',bottom:20,left:'50%',transform:'translateX(-50%)',background:G.black,color:G.gold,fontFamily:"'Oswald',sans-serif",fontSize:13,letterSpacing:'0.8px',padding:'10px 20px',borderRadius:8,zIndex:2000,whiteSpace:'nowrap',pointerEvents:'none'}}>{msg}</div>;
+}
+
+function PhotoGrid({photos,onPhotoClick}){
+  const [hov,setHov]=useState(null);
+  return <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:16}}>
+    {photos.map((p,i)=><div key={p.id||i} onClick={()=>onPhotoClick(i)} onMouseEnter={()=>setHov(p.id)} onMouseLeave={()=>setHov(null)}
+      style={{position:'relative',aspectRatio:'1',borderRadius:8,overflow:'hidden',cursor:'pointer',background:G.off}}>
+      <img src={p.src||p.storageUrl} alt={p.title} style={{width:'100%',height:'100%',objectFit:'cover',transition:'transform 0.2s',transform:hov===p.id?'scale(1.05)':'scale(1)'}}/>
+      <div style={{position:'absolute',top:7,left:7,background:'rgba(0,0,0,0.65)',color:'#fff',fontFamily:"'Oswald',sans-serif",fontSize:9,letterSpacing:'0.8px',textTransform:'uppercase',padding:'2px 6px',borderRadius:4}}>{p.cat||p.category}</div>
+      <div style={{position:'absolute',inset:0,background:'linear-gradient(to top,rgba(0,0,0,0.65) 0%,transparent 50%)',opacity:hov===p.id?1:0,transition:'opacity 0.2s',display:'flex',alignItems:'flex-end',padding:8}}>
+        <div style={{color:'#fff'}}>
+          <div style={{fontWeight:600,fontSize:12}}>{p.title}</div>
+          <div style={{fontSize:11,marginTop:2}}>{p.sport!=='ALL'?p.sport+' · ':''}{p.date||p.uploadDate} · ❤️ {p.likes||0}</div>
+        </div>
+      </div>
+    </div>)}
+  </div>;
+}
+
+function Lightbox({photos,idx,onClose,onNav}){
+  const p=photos[idx];
+  useEffect(()=>{
+    const h=e=>{if(e.key==='ArrowLeft')onNav(-1);if(e.key==='ArrowRight')onNav(1);if(e.key==='Escape')onClose();};
+    window.addEventListener('keydown',h);return()=>window.removeEventListener('keydown',h);
+  },[onNav,onClose]);
+  if(!p)return null;
+  return <div onClick={e=>{if(e.target===e.currentTarget)onClose();}} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.93)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column'}}>
+    <button onClick={onClose} style={{position:'absolute',top:16,right:16,background:'rgba(255,255,255,0.1)',border:'none',color:'#fff',fontSize:20,width:40,height:40,borderRadius:'50%',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
+    <button onClick={()=>onNav(-1)} style={{position:'absolute',left:16,top:'50%',transform:'translateY(-50%)',background:'rgba(255,255,255,0.1)',border:'none',color:'#fff',fontSize:28,padding:'10px 14px',borderRadius:8,cursor:'pointer'}}>‹</button>
+    <img src={p.src||p.storageUrl} alt={p.title} style={{maxWidth:'88vw',maxHeight:'68vh',borderRadius:8,objectFit:'contain'}}/>
+    <div style={{marginTop:16,textAlign:'center'}}>
+      <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:600,color:'#fff'}}>{p.title}</div>
+      <div style={{fontSize:13,color:'rgba(255,255,255,0.55)',marginTop:4}}>{p.cat||p.category} · {p.uploader} · {p.date||p.uploadDate} · ❤️ {p.likes||0}</div>
+    </div>
+    <div style={{display:'flex',gap:6,marginTop:14}}>{photos.map((_,i)=><div key={i} onClick={()=>onNav(i-idx)} style={{width:6,height:6,borderRadius:'50%',background:i===idx?G.gold:'rgba(255,255,255,0.3)',cursor:'pointer'}}/>)}</div>
+    <button onClick={()=>onNav(1)} style={{position:'absolute',right:16,top:'50%',transform:'translateY(-50%)',background:'rgba(255,255,255,0.1)',border:'none',color:'#fff',fontSize:28,padding:'10px 14px',borderRadius:8,cursor:'pointer'}}>›</button>
+  </div>;
+}
+
+// ─── FIRESTORE HELPERS ────────────────────────────────────────────────────────
+const fdb = {
+  add: (col, data) => addDoc(collection(db, col), {...data, createdAt: serverTimestamp()}),
+  set: (col, id, data) => setDoc(doc(db, col, id), {...data, updatedAt: serverTimestamp()}),
+  update: (col, id, data) => updateDoc(doc(db, col, id), data),
+  delete: (col, id) => deleteDoc(doc(db, col, id)),
+  get: (col, id) => getDoc(doc(db, col, id)),
+  getAll: async (col, constraints=[]) => {
+    const q = constraints.length ? query(collection(db, col), ...constraints) : collection(db, col);
+    const snap = await getDocs(q);
+    return snap.docs.map(d=>({id:d.id,...d.data()}));
+  },
+  listen: (col, constraints=[], cb) => {
+    const q = constraints.length ? query(collection(db, col), ...constraints) : collection(db, col);
+    return onSnapshot(q, snap => cb(snap.docs.map(d=>({id:d.id,...d.data()}))));
+  },
+  listenDoc: (col, id, cb) => onSnapshot(doc(db, col, id), snap => cb(snap.exists()?{id:snap.id,...snap.data()}:null)),
+};
+
+// ─── MAIN APP ─────────────────────────────────────────────────────────────────
+export default function App() {
+  const [authUser, setAuthUser] = useState(null); // Firebase auth user
+  const [userProfile, setUserProfile] = useState(null); // Firestore user doc
+  const [authLoading, setAuthLoading] = useState(true);
+  const [tab, setTab] = useState('dashboard');
+  const [toast, setToast] = useState('');
+  const [authMode, setAuthMode] = useState('login');
+  const [regRole, setRegRole] = useState('athlete');
+
+  const notify = msg => { setToast(msg); setTimeout(()=>setToast(''), 3500); };
+
+  // ── AUTH STATE LISTENER ──
+  useEffect(()=>{
+    const unsub = onAuthStateChanged(auth, async firebaseUser => {
+      if(firebaseUser) {
+        setAuthUser(firebaseUser);
+        // Load user profile from Firestore
+        const snap = await fdb.get('users', firebaseUser.uid);
+        if(snap.exists()) {
+          setUserProfile({id: firebaseUser.uid, ...snap.data()});
+        }
+      } else {
+        setAuthUser(null);
+        setUserProfile(null);
+      }
+      setAuthLoading(false);
+    });
+    return unsub;
+  }, []);
+
+  // ── LOGIN ──
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPw, setLoginPw] = useState('');
+  const [loginErr, setLoginErr] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
+
+  const doLogin = async () => {
+    setLoginErr(''); setLoginLoading(true);
+    try {
+      await signInWithEmailAndPassword(auth, loginEmail, loginPw);
+      setTab('dashboard');
+    } catch(e) {
+      setLoginErr(e.code==='auth/invalid-credential'?'Invalid email or password. Please try again.':e.message);
+    }
+    setLoginLoading(false);
+  };
+
+  const doLogout = async () => {
+    await signOut(auth);
+    setTab('dashboard');
+    setUserProfile(null);
+  };
+
+  // ── REGISTER ──
+  const [regF, setRegF] = useState({first:'',last:'',email:'',phone:'',pw:'',grade:'9th',jersey:'',sport:'',childName:'',gradYear:'',sportPlayed:''});
+  const [regErr, setRegErr] = useState('');
+  const [regLoading, setRegLoading] = useState(false);
+
+  const doRegister = async () => {
+    setRegErr(''); setRegLoading(true);
+    if(!regF.first||!regF.email||!regF.pw){setRegErr('Please fill in all required fields.');setRegLoading(false);return;}
+    if(regF.pw.length<6){setRegErr('Password must be at least 6 characters.');setRegLoading(false);return;}
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, regF.email, regF.pw);
+      const uid = cred.user.uid;
+      const autoApprove = regRole==='fan'||regRole==='alumni';
+      const profile = {
+        name: `${regF.first} ${regF.last}`.trim(),
+        email: regF.email,
+        phone: regF.phone,
+        role: regRole,
+        approved: autoApprove,
+        createdAt: serverTimestamp(),
+        ...(regRole==='athlete'?{sport:null,jersey:regF.jersey,grade:regF.grade}:{}),
+        ...(regRole==='coach'?{sport:regF.sport}:{}),
+        ...(regRole==='parent'?{childName:regF.childName}:{}),
+        ...(regRole==='alumni'?{gradYear:regF.gradYear,sportPlayed:regF.sportPlayed}:{}),
+      };
+      await fdb.set('users', uid, profile);
+      setUserProfile({id: uid, ...profile});
+      setTab('dashboard');
+      if(!autoApprove) notify('Account created! Awaiting admin/coach approval.');
+    } catch(e) {
+      setRegErr(e.code==='auth/email-already-in-use'?'That email is already registered.':e.message);
+    }
+    setRegLoading(false);
+  };
+
+  // ── NAV TABS ──
+  const navTabs = {
+    admin:[{id:'dashboard',label:'Dashboard'},{id:'photos',label:'Photos'},{id:'schedule',label:'Schedule'},{id:'roster',label:'Roster'},{id:'attendance',label:'Attendance'},{id:'health',label:'Health Log'},{id:'broadcast',label:'Broadcast'},{id:'reminders',label:'Reminders'},{id:'stats',label:'Stats'},{id:'messages',label:'Messages'},{id:'approvals',label:'Approvals'}],
+    coach:[{id:'dashboard',label:'Dashboard'},{id:'photos',label:'Photos'},{id:'my-team',label:'My Team'},{id:'schedule',label:'Schedule'},{id:'announcements',label:'Announce'},{id:'attendance',label:'Attendance'},{id:'health',label:'Health Log'},{id:'broadcast',label:'Broadcast'},{id:'reminders',label:'Reminders'},{id:'messages',label:'Messages'}],
+    athlete:[{id:'dashboard',label:'Dashboard'},{id:'photos',label:'Photos'},{id:'my-sports',label:'My Sports'},{id:'schedule',label:'Schedule'},{id:'stats',label:'Stats'}],
+    parent:[{id:'dashboard',label:'Dashboard'},{id:'photos',label:'Photos'},{id:'schedule',label:'Schedule'},{id:'attendance',label:'Attendance'},{id:'messages',label:'Messages'},{id:'notifications',label:'Notifications'}],
+    fan:[{id:'dashboard',label:'Dashboard'},{id:'community',label:'Fan Zone'},{id:'photos',label:'Photos'},{id:'schedule',label:'Schedule'},{id:'stats',label:'Stats'}],
+    alumni:[{id:'dashboard',label:'Dashboard'},{id:'community',label:'Fan Zone'},{id:'photos',label:'Photos'},{id:'schedule',label:'Schedule'},{id:'stats',label:'Stats'}],
+  };
+  const tabs = userProfile ? (navTabs[userProfile.role]||navTabs.fan) : [];
+
+  // ── LOADING STATE ──
+  if(authLoading) return (
+    <div style={{...s.page, display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:16}}>
+      <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet"/>
+      <img src="https://image.maxpreps.io/school-mascot/2/c/a/2ca3712c-3b97-4458-9d65-3d773dad62ea.gif?version=637987468200000000&width=128&height=128&auto=webp&format=pjpg" style={{width:80,height:80,objectFit:'contain'}} alt="Vikings"/>
+      <div style={{fontFamily:"'Oswald',sans-serif",fontSize:24,fontWeight:700,color:G.black}}>VIKINGS</div>
+      <Spinner/>
+    </div>
+  );
+
+  // ── AUTH SCREEN ──
+  if(!authUser || !userProfile) return (
+    <div style={s.page}>
+      <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet"/>
+      <div style={s.header}>
+        <div style={s.headerInner}>
+          <img src="https://image.maxpreps.io/school-mascot/2/c/a/2ca3712c-3b97-4458-9d65-3d773dad62ea.gif?version=637987468200000000&width=128&height=128&auto=webp&format=pjpg" style={s.mascot} alt="Vikings" onError={e=>e.target.style.display='none'}/>
+          <div>
+            <div style={s.schoolName}>Dr. L.G. Pinkston Sr. High School</div>
+            <div style={s.teamName}>VIKINGS</div>
+            <div style={s.tagline}>Athletics Program · Dallas, TX</div>
+          </div>
+        </div>
+        <div style={s.goldBar}/>
+      </div>
+      <div style={{padding:'32px 20px'}}>
+        <div style={{maxWidth:420,margin:'0 auto'}}>
+          <div style={{display:'flex',border:`0.5px solid rgba(0,0,0,0.12)`,borderRadius:8,overflow:'hidden',marginBottom:20}}>
+            {['login','register'].map(m=><button key={m} onClick={()=>{setAuthMode(m);setLoginErr('');setRegErr('');}} style={{flex:1,padding:10,fontFamily:"'Oswald',sans-serif",fontSize:12,letterSpacing:'1px',textTransform:'uppercase',border:'none',background:authMode===m?G.black:G.white,cursor:'pointer',color:authMode===m?G.gold:G.muted}}>{m==='login'?'Sign In':'Register'}</button>)}
+          </div>
+
+          {authMode==='login' ? (
+            <Card>
+              <CardTitle>Welcome Back, Vikings</CardTitle>
+              <div style={{marginBottom:12}}>
+                <label style={s.label}>Email</label>
+                <input style={s.input} type="email" placeholder="your@email.com" value={loginEmail} onChange={e=>setLoginEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&doLogin()}/>
+              </div>
+              <div style={{marginBottom:16}}>
+                <label style={s.label}>Password</label>
+                <input style={s.input} type="password" placeholder="••••••••" value={loginPw} onChange={e=>setLoginPw(e.target.value)} onKeyDown={e=>e.key==='Enter'&&doLogin()}/>
+              </div>
+              {loginErr&&<div style={{color:G.red,fontSize:13,marginBottom:12,background:G.redBg,padding:'8px 12px',borderRadius:6}}>{loginErr}</div>}
+              <Btn variant="primary" style={{width:'100%'}} onClick={doLogin} disabled={loginLoading}>{loginLoading?'Signing in...':'Sign In'}</Btn>
+              <div style={{marginTop:16,padding:'12px',background:G.off,borderRadius:8}}>
+                <div style={{fontSize:12,color:G.muted,marginBottom:8,fontFamily:"'Oswald',sans-serif",letterSpacing:'0.8px',textTransform:'uppercase'}}>First time here?</div>
+                <div style={{fontSize:13,color:'#555',lineHeight:1.6}}>Click <strong>Register</strong> above to create your account. Coaches, athletes, and parents need admin approval before accessing the app.</div>
+              </div>
+            </Card>
+          ) : (
+            <Card>
+              <CardTitle>Create Account</CardTitle>
+              <div style={{marginBottom:14}}>
+                <div style={s.label}>I am a...</div>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginTop:8,marginBottom:4}}>
+                  {[{r:'athlete',icon:'🏃'},{r:'coach',icon:'📋'},{r:'parent',icon:'👨‍👩‍👧'},{r:'admin',icon:'⚙️'},{r:'fan',icon:'📣'},{r:'alumni',icon:'🎓'}].map(({r,icon})=>(
+                    <div key={r} onClick={()=>setRegRole(r)} style={{border:`0.5px solid ${regRole===r?G.gold:'rgba(0,0,0,0.12)'}`,borderRadius:8,padding:'12px 8px',textAlign:'center',cursor:'pointer',background:regRole===r?G.goldPale:G.white}}>
+                      <div style={{fontSize:22,marginBottom:5}}>{icon}</div>
+                      <div style={{fontFamily:"'Oswald',sans-serif",fontSize:11,letterSpacing:'0.8px',textTransform:'uppercase'}}>{r}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+                <div><label style={s.label}>First Name *</label><input style={s.input} placeholder="First" value={regF.first} onChange={e=>setRegF(f=>({...f,first:e.target.value}))}/></div>
+                <div><label style={s.label}>Last Name</label><input style={s.input} placeholder="Last" value={regF.last} onChange={e=>setRegF(f=>({...f,last:e.target.value}))}/></div>
+              </div>
+              <div style={{marginBottom:12}}><label style={s.label}>Email *</label><input style={s.input} type="email" placeholder="your@email.com" value={regF.email} onChange={e=>setRegF(f=>({...f,email:e.target.value}))}/></div>
+              <div style={{marginBottom:12}}><label style={s.label}>Phone (for SMS alerts)</label><input style={s.input} type="tel" placeholder="(214) 555-0100" value={regF.phone} onChange={e=>setRegF(f=>({...f,phone:e.target.value}))}/></div>
+              <div style={{marginBottom:12}}><label style={s.label}>Password * (min 6 chars)</label><input style={s.input} type="password" placeholder="••••••••" value={regF.pw} onChange={e=>setRegF(f=>({...f,pw:e.target.value}))}/></div>
+              {regRole==='athlete'&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+                <div><label style={s.label}>Grade</label><select style={s.input} value={regF.grade} onChange={e=>setRegF(f=>({...f,grade:e.target.value}))}>{['9th','10th','11th','12th'].map(g=><option key={g}>{g}</option>)}</select></div>
+                <div><label style={s.label}>Jersey #</label><input style={s.input} placeholder="12" value={regF.jersey} onChange={e=>setRegF(f=>({...f,jersey:e.target.value}))}/></div>
+              </div>}
+              {regRole==='coach'&&<div style={{marginBottom:12}}><label style={s.label}>Sport</label><select style={s.input} value={regF.sport} onChange={e=>setRegF(f=>({...f,sport:e.target.value}))}><option value="">Select sport...</option>{SPORTS.map(sp=><option key={sp.key} value={sp.key}>{sp.key}</option>)}</select></div>}
+              {regRole==='parent'&&<div style={{marginBottom:12}}><label style={s.label}>Athlete's Full Name</label><input style={s.input} placeholder="Your child's full name" value={regF.childName} onChange={e=>setRegF(f=>({...f,childName:e.target.value}))}/></div>}
+              {regRole==='alumni'&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+                <div><label style={s.label}>Grad Year</label><input style={s.input} placeholder="2018" value={regF.gradYear} onChange={e=>setRegF(f=>({...f,gradYear:e.target.value}))}/></div>
+                <div><label style={s.label}>Sport Played</label><input style={s.input} placeholder="Football" value={regF.sportPlayed} onChange={e=>setRegF(f=>({...f,sportPlayed:e.target.value}))}/></div>
+              </div>}
+              {regErr&&<div style={{color:G.red,fontSize:13,marginBottom:12,background:G.redBg,padding:'8px 12px',borderRadius:6}}>{regErr}</div>}
+              <Btn variant="primary" style={{width:'100%',marginTop:4}} onClick={doRegister} disabled={regLoading}>{regLoading?'Creating account...':'Create Account'}</Btn>
+            </Card>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── MAIN APP ──
+  return (
+    <div style={s.page}>
+      <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet"/>
+      <div style={s.header}>
+        <div style={s.headerInner}>
+          <img src="https://image.maxpreps.io/school-mascot/2/c/a/2ca3712c-3b97-4458-9d65-3d773dad62ea.gif?version=637987468200000000&width=128&height=128&auto=webp&format=pjpg" style={s.mascot} alt="Vikings" onError={e=>e.target.style.display='none'}/>
+          <div>
+            <div style={s.schoolName}>Dr. L.G. Pinkston Sr. High School</div>
+            <div style={s.teamName}>VIKINGS</div>
+            <div style={s.tagline}>Athletics Program · Dallas, TX</div>
+          </div>
+          <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
+            <div style={{display:'flex',alignItems:'center',gap:8,background:'rgba(255,255,255,0.08)',border:'0.5px solid rgba(255,255,255,0.15)',borderRadius:20,padding:'6px 12px'}}>
+              <strong style={{fontSize:12,color:G.gold}}>{userProfile.name?.split(' ')[0]}</strong>
+              <Badge role={userProfile.role}>{userProfile.role}</Badge>
+            </div>
+            <button onClick={doLogout} style={{fontFamily:"'Oswald',sans-serif",fontSize:11,letterSpacing:'1px',textTransform:'uppercase',background:'transparent',border:'0.5px solid rgba(255,255,255,0.2)',color:'rgba(255,255,255,0.5)',padding:'5px 10px',borderRadius:6,cursor:'pointer'}}>Sign Out</button>
+          </div>
+        </div>
+        <div style={s.goldBar}/>
+      </div>
+
+      <div style={s.nav}>
+        {tabs.map((t,i)=>(
+          <button key={t.id} style={s.navBtn(tab===t.id||(i===0&&!tabs.find(x=>x.id===tab)))} onClick={()=>setTab(t.id)}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {!userProfile.approved && (userProfile.role!=='fan'&&userProfile.role!=='alumni') && (
+        <div style={{background:'#fef9c3',borderBottom:`1px solid rgba(133,77,14,0.3)`,padding:'12px 20px',fontSize:13,color:'#854d0e',textAlign:'center'}}>
+          ⏳ Your account is pending approval. A coach or admin will review your request shortly.
+        </div>
+      )}
+
+      <div style={s.content}>
+        <AppContent
+          user={userProfile}
+          tab={tab}
+          setTab={setTab}
+          notify={notify}
+          fdb={fdb}
+          db={db}
+          storage={storage}
+          storageRef={ref}
+          uploadBytes={uploadBytes}
+          getDownloadURL={getDownloadURL}
+          serverTimestamp={serverTimestamp}
+          query={query}
+          where={where}
+          orderBy={orderBy}
+          collection={collection}
+          onSnapshot={onSnapshot}
+          updateDoc={updateDoc}
+          doc={doc}
+          SPORTS={SPORTS}
+          PHOTO_CATS={PHOTO_CATS}
+          AUDIENCE_OPTS={AUDIENCE_OPTS}
+          INJURY_TYPES={INJURY_TYPES}
+          INJURY_STATUS={INJURY_STATUS}
+          G={G}
+          s={s}
+        />
+      </div>
+      {toast&&<Toast msg={toast}/>}
+    </div>
+  );
+}
+
+// ─── APP CONTENT (receives all props) ────────────────────────────────────────
+function AppContent({user, tab, setTab, notify, fdb, db, storage, storageRef, uploadBytes, getDownloadURL, serverTimestamp, query, where, orderBy, collection, onSnapshot, updateDoc, doc, SPORTS, PHOTO_CATS, AUDIENCE_OPTS, INJURY_TYPES, INJURY_STATUS, G, s}) {
+
+  // ── SHARED STATE ──
+  const [schedFilter, setSchedFilter] = useState('All');
+  const [rosterFilter, setRosterFilter] = useState('All');
+  const [photoCat, setPhotoCat] = useState('All');
+  const [lbIdx, setLbIdx] = useState(null);
+  const [attSport, setAttSport] = useState(SPORTS[0].key);
+  const [attDate, setAttDate] = useState(new Date().toLocaleDateString('en-US',{month:'short',day:'numeric'}));
+  const [activeThread, setActiveThread] = useState(null);
+  const [msgInput, setMsgInput] = useState('');
+  const chatRef = useRef(null);
+
+  // ── FIRESTORE LIVE DATA ──
+  const [schedules, setSchedules] = useState([]);
+  const [announcements, setAnnouncements] = useState([]);
+  const [attendance, setAttendance] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [photos, setPhotos] = useState([]);
+  const [pendingPhotos, setPendingPhotos] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [injuries, setInjuries] = useState([]);
+  const [broadcasts, setBroadcasts] = useState([]);
+  const [reminders, setReminders] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [pendingUsers, setPendingUsers] = useState([]);
+
+  // ── SUBSCRIBE TO FIRESTORE ──
+  useEffect(()=>{
+    const unsubs = [];
+    unsubs.push(fdb.listen('schedules',[orderBy('createdAt','desc')],setSchedules));
+    unsubs.push(fdb.listen('announcements',[orderBy('createdAt','desc')],setAnnouncements));
+    unsubs.push(fdb.listen('attendance',[],setAttendance));
+    unsubs.push(fdb.listen('photos',[where('approved','==',true)],setPhotos));
+    unsubs.push(fdb.listen('photos',[where('approved','==',false)],setPendingPhotos));
+    unsubs.push(fdb.listen('injuries',[orderBy('createdAt','desc')],setInjuries));
+    unsubs.push(fdb.listen('broadcasts',[orderBy('createdAt','desc')],setBroadcasts));
+    unsubs.push(fdb.listen('reminders',[orderBy('createdAt','desc')],setReminders));
+    unsubs.push(fdb.listen('users',[where('approved','==',true)],setUsers));
+    unsubs.push(fdb.listen('users',[where('approved','==',false)],setPendingUsers));
+    unsubs.push(fdb.listen('notifications',[orderBy('createdAt','desc')],setNotifications));
+    if(activeThread) {
+      unsubs.push(fdb.listen(`threads/${activeThread}/messages`,[orderBy('createdAt','asc')],setMessages));
+    }
+    return ()=>unsubs.forEach(u=>u&&u());
+  },[activeThread]);
+
+  useEffect(()=>{if(chatRef.current)chatRef.current.scrollTop=chatRef.current.scrollHeight;},[messages]);
+
+  // ── ACTIONS ──
+  const addSchedule = async (data) => { await fdb.add('schedules',{...data,createdBy:user.id,sport:user.sport||data.sport}); notify('Game added!'); };
+  const addAnnouncement = async (data) => { await fdb.add('announcements',{...data,coach:user.name,coachId:user.id}); notify('Announcement posted!'); };
+
+  const markAttendance = async (athleteId, athleteName, athleteSport, status) => {
+    const existing = attendance.find(a=>a.athleteId===athleteId&&a.date===attDate&&a.sport===attSport);
+    if(existing) {
+      await updateDoc(doc(db,'attendance',existing.id),{status});
+    } else {
+      await fdb.add('attendance',{athleteId,athleteName,sport:attSport,date:attDate,status,markedBy:user.id,markedByName:user.name});
+    }
+    if(status==='absent'||status==='tardy') {
+      const parent = users.find(u=>u.role==='parent'&&u.childName===athleteName);
+      if(parent) {
+        const already = notifications.find(n=>n.athleteName===athleteName&&n.date===attDate&&n.type===status);
+        if(!already) {
+          await fdb.add('notifications',{parentId:parent.id,parentName:parent.name,athleteId,athleteName,type:status,sport:attSport,date:attDate,sent:true,channel:'Email + SMS',message:`${athleteName} was marked ${status} at ${attSport} on ${attDate}.`});
+        }
+      }
+      notify(status==='absent'?'Marked absent — 📧 Email + SMS sent':'Marked tardy — 📧 Email + SMS sent');
+    } else {
+      notify('Marked present ✓');
+    }
+  };
+
+  const sendMessage = async (threadId, receiverId) => {
+    if(!msgInput.trim()) return;
+    await fdb.add(`threads/${threadId}/messages`,{senderId:user.id,senderName:user.name,receiverId,text:msgInput.trim()});
+    setMsgInput('');
+  };
+
+  const approveUser = async (uid) => { await updateDoc(doc(db,'users',uid),{approved:true}); notify('User approved!'); };
+  const rejectUser = async (uid) => { await fdb.delete('users',uid); notify('User declined.'); };
+  const approvePhoto = async (photoId) => { await updateDoc(doc(db,'photos',photoId),{approved:true}); notify('Photo approved!'); };
+  const rejectPhoto = async (photoId) => { await fdb.delete('photos',photoId); notify('Photo declined.'); };
+
+  const uploadPhoto = async (title, cat, sport, file) => {
+    if(!title){notify('Please add a title.');return;}
+    let url = null;
+    if(file) {
+      const r = storageRef(storage,`photos/${Date.now()}_${file.name}`);
+      await uploadBytes(r, file);
+      url = await getDownloadURL(r);
+    }
+    await fdb.add('photos',{title,category:cat,cat,sport,storageUrl:url||'',src:url||`https://via.placeholder.com/400x400/0a1628/c9961a?text=${encodeURIComponent(title)}`,uploader:user.name,uploaderId:user.id,uploadDate:new Date().toLocaleDateString('en-US',{month:'short',day:'numeric'}),approved:false,likes:0});
+    notify('Submitted for review!');
+  };
+
+  const addInjury = async (data) => { await fdb.add('injuries',{...data,coachId:user.id,coach:user.name,private:true}); notify('Health record saved.'); };
+  const sendBroadcast = async (sport, title, message) => {
+    const athletes = users.filter(u=>u.role==='athlete'&&u.sport===sport);
+    const parents = users.filter(u=>u.role==='parent'&&athletes.some(a=>a.name===u.childName));
+    const count = athletes.length+parents.length;
+    await fdb.add('broadcasts',{sport,title,message,sentBy:user.name,sentById:user.id,recipients:`All ${sport} Athletes & Parents`,recipientCount:count});
+    notify(`📢 Broadcast sent to ${count} people!`);
+  };
+  const scheduleReminder = async (data) => { await fdb.add('reminders',{...data,sentBy:user.name,sentById:user.id,sent:false}); notify('⏰ Reminder scheduled!'); };
+  const updateLiveScore = async (gameId, us, them, quarter) => { await updateDoc(doc(db,'schedules',gameId),{liveScore:{us,them,quarter,live:true}}); notify('Score updated!'); };
+
+  // ── FILTERED DATA ──
+  const visiblePhotos = photoCat==='All' ? photos : photos.filter(p=>(p.cat||p.category)===photoCat);
+  const myAnnouncements = announcements.filter(ann=>{
+    if(!ann.audience||ann.audience.includes('all')) return true;
+    const r = user.role;
+    if(r==='athlete'||r==='parent') return ann.audience.includes('athletes_parents');
+    if(r==='coach'||r==='admin') return true;
+    if(r==='fan'||r==='alumni') return ann.audience.includes('fans_alumni');
+    return false;
+  });
+  const athletes = users.filter(u=>u.role==='athlete');
+  const myTeamAthletes = athletes.filter(u=>u.sport===user.sport);
+  const myAttendance = attendance.filter(a=>a.athleteId===user.id);
+  const myNotifications = notifications.filter(n=>n.parentId===user.id||n.parentName===user.name);
+  const liveGames = schedules.filter(g=>g.liveScore?.live);
+
+  // ── RENDER ──
+  const renderTab = () => {
+    switch(tab) {
+      case 'dashboard': return <DashboardTab/>;
+      case 'photos': return <PhotoTab/>;
+      case 'schedule': return <ScheduleTab/>;
+      case 'my-sports': return <MySportsTab/>;
+      case 'my-team': return <MyTeamTab/>;
+      case 'announcements': return <AnnouncementsTab/>;
+      case 'roster': return <RosterTab/>;
+      case 'attendance': return <AttendanceTab/>;
+      case 'health': return <HealthTab/>;
+      case 'broadcast': return <BroadcastTab/>;
+      case 'reminders': return <RemindersTab/>;
+      case 'community': return <CommunityTab/>;
+      case 'stats': return <StatsTab/>;
+      case 'messages': return <MessagesTab/>;
+      case 'approvals': return <ApprovalsTab/>;
+      case 'notifications': return <NotificationsTab/>;
+      default: return <DashboardTab/>;
+    }
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // DASHBOARD
+  // ─────────────────────────────────────────────────────────────────────────
+  function DashboardTab() {
+    const r = user.role;
+    const myGames = schedules.filter(s=>s.sport===user.sport).slice(0,3);
+    const activeInjuries = injuries.filter(i=>i.sport===user.sport&&i.status!=='Cleared');
+
+    if(r==='admin') return <div>
+      <div style={s.pageHeader}><span style={s.pageTitle}>Admin Dashboard</span></div>
+      <StatGrid stats={[{num:users.length,lbl:'Users'},{num:athletes.length,lbl:'Athletes'},{num:pendingUsers.length+pendingPhotos.length,lbl:'Pending',color:pendingUsers.length+pendingPhotos.length>0?G.red:G.green}]}/>
+      <Card><CardTitle>Quick Actions</CardTitle><div style={{display:'flex',gap:8,flexWrap:'wrap'}}><Btn variant="primary" sm onClick={()=>setTab('approvals')}>Approvals ({pendingUsers.length+pendingPhotos.length})</Btn><Btn variant="outline" sm onClick={()=>setTab('broadcast')}>Broadcast</Btn><Btn variant="outline" sm onClick={()=>setTab('health')}>Health Log</Btn></div></Card>
+      <Card><CardTitle>Recent Notifications</CardTitle>{notifications.slice(0,4).map(n=><NotifRow key={n.id} n={n}/>)||<Empty/>}</Card>
+    </div>;
+
+    if(r==='coach') return <div>
+      <div style={s.pageHeader}><div><span style={s.pageTitle}>Coach Dashboard</span><span style={s.pageSub}>{user.sport}</span></div></div>
+      <StatGrid stats={[{num:myTeamAthletes.length,lbl:'Athletes'},{num:activeInjuries.length,lbl:'Active Injuries',color:activeInjuries.length>0?G.red:G.green},{num:myGames.length,lbl:'Games'}]}/>
+      {activeInjuries.length>0&&<Card style={{borderLeft:`3px solid ${G.red}`}}><CardTitle>⚠️ Active Injuries</CardTitle>{activeInjuries.map(i=><div key={i.id} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:`0.5px solid ${G.off}`}}><div style={{flex:1}}><div style={{fontWeight:600,fontSize:13}}>{i.athleteName}</div><div style={{fontSize:12,color:G.muted}}>{i.type} · {i.location}</div></div><Badge role={i.status}>{i.status}</Badge></div>)}</Card>}
+      <Card><CardTitle>Upcoming Games</CardTitle>{myGames.length?myGames.map(g=><GameItem key={g.id} g={g}/>):<Empty msg="No games scheduled yet."/>}</Card>
+      <Card><CardTitle>Quick Actions</CardTitle><div style={{display:'flex',gap:8,flexWrap:'wrap'}}><Btn variant="gold" sm onClick={()=>setTab('broadcast')}>Broadcast</Btn><Btn variant="outline" sm onClick={()=>setTab('health')}>Health Log</Btn><Btn variant="outline" sm onClick={()=>setTab('attendance')}>Attendance</Btn></div></Card>
+    </div>;
+
+    if(r==='athlete') return <div>
+      <div style={s.pageHeader}><div><span style={s.pageTitle}>My Dashboard</span><span style={s.pageSub}>{user.sport||'No team yet'}</span></div></div>
+      <StatGrid stats={[{num:myAttendance.length,lbl:'Sessions'},{num:myAttendance.filter(a=>a.status==='absent').length,lbl:'Absences',color:G.red},{num:myAttendance.filter(a=>a.status==='tardy').length,lbl:'Tardies',color:G.gold}]}/>
+      {user.sport&&<Card><CardTitle>Upcoming — {user.sport}</CardTitle>{myGames.length?myGames.map(g=><GameItem key={g.id} g={g}/>):<Empty msg="No upcoming games."/>}</Card>}
+      <Card><CardTitle>Announcements</CardTitle>{myAnnouncements.slice(0,3).map(a=><AnnItem key={a.id} ann={a}/>)||<Empty/>}</Card>
+    </div>;
+
+    if(r==='parent') {
+      const childAtt = attendance.filter(a=>a.athleteName===user.childName);
+      return <div>
+        <div style={s.pageHeader}><div><span style={s.pageTitle}>Parent Dashboard</span><span style={s.pageSub}>{user.childName}</span></div></div>
+        <StatGrid stats={[{num:childAtt.length,lbl:'Sessions'},{num:childAtt.filter(a=>a.status==='absent').length,lbl:'Absences',color:G.red},{num:childAtt.filter(a=>a.status==='tardy').length,lbl:'Tardies',color:G.gold}]}/>
+        <Card><CardTitle>Recent Notifications</CardTitle>{myNotifications.length?myNotifications.slice(0,4).map(n=><NotifRow key={n.id} n={n}/>):<Empty msg="No notifications yet."/>}</Card>
+      </div>;
+    }
+
+    // Fan / Alumni
+    return <div>
+      <div style={s.pageHeader}><div><span style={s.pageTitle}>Vikings {r==='alumni'?'Alumni':'Fan'} Hub</span></div></div>
+      <StatGrid stats={[{num:SPORTS.length,lbl:'Programs'},{num:schedules.filter(g=>g.badge==='win').length,lbl:'Wins'},{num:liveGames.length,lbl:'Live Now',color:liveGames.length>0?G.red:G.muted}]}/>
+      {liveGames.length>0&&<Card style={{border:`1.5px solid ${G.red}`}}><CardTitle>🔴 Live Now</CardTitle>{liveGames.map(g=><GameItem key={g.id} g={g} showLive/>)}</Card>}
+      <Card><CardTitle>Upcoming Games</CardTitle>{schedules.slice(0,5).map(g=><GameItem key={g.id} g={g}/>)||<Empty/>}</Card>
+    </div>;
+  }
+
+  function NotifRow({n}) {
+    const icons={absent:'🔴',tardy:'🟡',reminder:'🔔',broadcast:'📢'};
+    return <div style={{display:'flex',gap:10,padding:'8px 0',borderBottom:`0.5px solid ${G.off}`,fontSize:13}}>
+      <span style={{fontSize:16,flexShrink:0}}>{icons[n.type]||'📩'}</span>
+      <div style={{flex:1}}>
+        <div style={{fontWeight:600,color:G.black}}>{n.athleteName||n.message?.slice(0,50)||'Notification'}</div>
+        <div style={{fontSize:12,color:G.muted}}>{n.type} · {n.sport} · {n.date}</div>
+        {n.channel&&<div style={{fontSize:11,color:G.muted}}>📧 {n.channel}</div>}
+      </div>
+    </div>;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // SCHEDULE
+  // ─────────────────────────────────────────────────────────────────────────
+  function ScheduleTab() {
+    const [modal, setModal] = useState(false);
+    const [gf, setGf] = useState({month:'',day:'',opponent:'',details:'',badge:'home'});
+    const pills = ['All',...SPORTS.map(s=>s.key)];
+    const items = schedFilter==='All'?schedules:schedules.filter(g=>g.sport===schedFilter);
+    const save = async () => {
+      if(!gf.opponent||!gf.month||!gf.day) return;
+      await addSchedule(gf);
+      setGf({month:'',day:'',opponent:'',details:'',badge:'home'});
+      setModal(false);
+    };
+    return <div>
+      <div style={s.pageHeader}><span style={s.pageTitle}>Schedule</span>{user.role==='coach'&&<Btn variant="gold" sm onClick={()=>setModal(true)}>+ Add Game</Btn>}</div>
+      <FilterBar cats={pills} active={schedFilter} onChange={setSchedFilter}/>
+      <Card>{items.length?items.map(g=><GameItem key={g.id} g={g} showLive/>):<Empty msg="No games scheduled yet."/>}</Card>
+      {modal&&<Modal title="Add Game" onClose={()=>setModal(false)}>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+          <div><label style={s.label}>Month</label><input style={s.input} placeholder="Apr" value={gf.month} onChange={e=>setGf(x=>({...x,month:e.target.value}))}/></div>
+          <div><label style={s.label}>Day</label><input style={s.input} placeholder="15" value={gf.day} onChange={e=>setGf(x=>({...x,day:e.target.value}))}/></div>
+        </div>
+        <div style={{marginBottom:12}}><label style={s.label}>Opponent</label><input style={s.input} placeholder="vs. Lincoln HS" value={gf.opponent} onChange={e=>setGf(x=>({...x,opponent:e.target.value}))}/></div>
+        <div style={{marginBottom:12}}><label style={s.label}>Details</label><input style={s.input} placeholder="7:00 PM · Main Gym" value={gf.details} onChange={e=>setGf(x=>({...x,details:e.target.value}))}/></div>
+        <div style={{marginBottom:16}}><label style={s.label}>Type</label><select style={s.input} value={gf.badge} onChange={e=>setGf(x=>({...x,badge:e.target.value}))}><option value="home">Home</option><option value="away">Away</option></select></div>
+        <div style={{display:'flex',gap:8}}><Btn variant="primary" onClick={save}>Add</Btn><Btn variant="outline" onClick={()=>setModal(false)}>Cancel</Btn></div>
+      </Modal>}
+    </div>;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // MY SPORTS
+  // ─────────────────────────────────────────────────────────────────────────
+  function MySportsTab() {
+    const join = async (sport) => {
+      if(user.sport===sport){notify('Already on this team.');return;}
+      await updateDoc(doc(db,'users',user.id),{sport});
+      notify(`Request sent to ${sport} coach!`);
+    };
+    return <div>
+      <div style={s.pageHeader}><span style={s.pageTitle}>My Sports</span></div>
+      <Card style={{marginBottom:12}}><div style={{fontSize:13,color:G.muted}}>Select your sport to request joining. Your coach must approve before you appear on the roster.</div></Card>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(108px,1fr))',gap:10}}>
+        {SPORTS.map(sp=>{
+          const joined=user.sport===sp.key;
+          return <div key={sp.key} onClick={()=>join(sp.key)} style={{background:joined?G.goldPale:G.white,borderRadius:10,border:`0.5px solid ${joined?G.gold:'rgba(0,0,0,0.08)'}`,padding:'14px 10px 12px',textAlign:'center',cursor:'pointer'}}>
+            <div style={{fontSize:22,marginBottom:6}}>{sp.icon}</div>
+            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:11,fontWeight:500,letterSpacing:'0.8px',textTransform:'uppercase',color:G.black}}>{sp.key}</div>
+            <div style={{fontSize:11,color:G.muted,marginTop:3}}>{joined?<Badge role="approved">Joined</Badge>:'Join'}</div>
+          </div>;
+        })}
+      </div>
+    </div>;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // MY TEAM
+  // ─────────────────────────────────────────────────────────────────────────
+  function MyTeamTab() {
+    const sport = user.sport||'Football';
+    const teamAthletes = athletes.filter(u=>u.sport===sport);
+    const pending = pendingUsers.filter(u=>u.role==='athlete'&&u.sport===sport);
+    return <div>
+      <div style={s.pageHeader}><div><span style={s.pageTitle}>My Team</span><span style={s.pageSub}>{sport}</span></div></div>
+      {pending.length>0&&<Card><CardTitle>Pending Approvals ({pending.length})</CardTitle>{pending.map(u=><div key={u.id} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',borderBottom:`0.5px solid ${G.off}`}}>
+        <div style={{flex:1}}><div style={{fontWeight:600,fontSize:14}}>{u.name}</div><div style={{fontSize:12,color:G.muted}}>#{u.jersey||'—'} · Grade {u.grade||'—'}</div></div>
+        <div style={{display:'flex',gap:6}}><Btn variant="gold" sm onClick={()=>approveUser(u.id)}>Approve</Btn><Btn variant="danger" sm onClick={()=>rejectUser(u.id)}>Decline</Btn></div>
+      </div>)}</Card>}
+      <Card><CardTitle>Roster — {teamAthletes.length} Athletes</CardTitle>
+        {teamAthletes.length?<table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+          <thead><tr>{['#','Name','Grade','Phone'].map(h=><th key={h} style={{fontFamily:"'Oswald',sans-serif",fontSize:11,fontWeight:500,letterSpacing:'1px',textTransform:'uppercase',color:G.muted,textAlign:'left',padding:'8px 10px',borderBottom:`1px solid ${G.off}`}}>{h}</th>)}</tr></thead>
+          <tbody>{teamAthletes.map(a=><tr key={a.id}><td style={{padding:'10px'}}><span style={{display:'inline-block',background:G.black,color:G.gold,fontFamily:"'Oswald',sans-serif",fontSize:12,fontWeight:700,width:28,height:28,borderRadius:'50%',textAlign:'center',lineHeight:'28px'}}>{a.jersey||'—'}</span></td><td style={{padding:'10px',fontWeight:500}}>{a.name}</td><td style={{padding:'10px',color:G.muted}}>{a.grade||'—'}</td><td style={{padding:'10px',fontSize:12,color:G.muted}}>{a.phone||'—'}</td></tr>)}</tbody>
+        </table>:<Empty msg="No athletes on this team yet."/>}
+      </Card>
+    </div>;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ANNOUNCEMENTS
+  // ─────────────────────────────────────────────────────────────────────────
+  function AnnouncementsTab() {
+    const [modal, setModal] = useState(false);
+    const [af, setAf] = useState({title:'',body:'',audience:['all']});
+    const sport = user.sport||'Football';
+    const myAnns = announcements.filter(a=>a.sport===sport||a.sport==='ALL');
+    const toggleAud = v => setAf(f=>({...f,audience:f.audience.includes(v)?f.audience.filter(x=>x!==v):[...f.audience,v]}));
+    const save = async () => {
+      if(!af.title) return;
+      await addAnnouncement({...af,sport:user.sport||'ALL',date:new Date().toLocaleDateString('en-US',{month:'short',day:'numeric'})});
+      setAf({title:'',body:'',audience:['all']});setModal(false);
+    };
+    return <div>
+      <div style={s.pageHeader}><div><span style={s.pageTitle}>Announcements</span><span style={s.pageSub}>{sport}</span></div><Btn variant="gold" sm onClick={()=>setModal(true)}>+ New Post</Btn></div>
+      <Card>{myAnns.length?myAnns.map(a=><AnnItem key={a.id} ann={a}/>):<Empty msg="No announcements yet."/>}</Card>
+      {modal&&<Modal title="New Announcement" onClose={()=>setModal(false)}>
+        <div style={{marginBottom:12}}><label style={s.label}>Title</label><input style={s.input} value={af.title} onChange={e=>setAf(f=>({...f,title:e.target.value}))} placeholder="e.g. Practice Cancelled"/></div>
+        <div style={{marginBottom:12}}><label style={s.label}>Message</label><textarea style={{...s.input,minHeight:80,resize:'vertical'}} value={af.body} onChange={e=>setAf(f=>({...f,body:e.target.value}))} placeholder="Details..."/></div>
+        <div style={{marginBottom:16}}><label style={s.label}>Share With</label><div style={{display:'flex',gap:10,flexWrap:'wrap'}}>{AUDIENCE_OPTS.map(o=><label key={o.val} style={{display:'flex',alignItems:'center',gap:5,fontSize:13,cursor:'pointer'}}><input type="checkbox" checked={af.audience.includes(o.val)} onChange={()=>toggleAud(o.val)} style={{accentColor:G.gold}}/> {o.label}</label>)}</div></div>
+        <div style={{display:'flex',gap:8}}><Btn variant="primary" onClick={save}>Post</Btn><Btn variant="outline" onClick={()=>setModal(false)}>Cancel</Btn></div>
+      </Modal>}
+    </div>;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ROSTER
+  // ─────────────────────────────────────────────────────────────────────────
+  function RosterTab() {
+    const filtered = athletes.filter(a=>rosterFilter==='All'||a.sport===rosterFilter);
+    return <div>
+      <div style={s.pageHeader}><div><span style={s.pageTitle}>Roster</span><span style={s.pageSub}>{athletes.length} athletes</span></div></div>
+      <FilterBar cats={['All',...SPORTS.map(s=>s.key)]} active={rosterFilter} onChange={setRosterFilter}/>
+      <Card>
+        {filtered.length?<table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+          <thead><tr>{['#','Name','Sport','Grade'].map(h=><th key={h} style={{fontFamily:"'Oswald',sans-serif",fontSize:11,fontWeight:500,letterSpacing:'1px',textTransform:'uppercase',color:G.muted,textAlign:'left',padding:'8px 10px',borderBottom:`1px solid ${G.off}`}}>{h}</th>)}</tr></thead>
+          <tbody>{filtered.map(a=><tr key={a.id}><td style={{padding:'10px'}}><span style={{display:'inline-block',background:G.black,color:G.gold,fontFamily:"'Oswald',sans-serif",fontSize:12,fontWeight:700,width:28,height:28,borderRadius:'50%',textAlign:'center',lineHeight:'28px'}}>{a.jersey||'—'}</span></td><td style={{padding:'10px',fontWeight:500}}>{a.name}</td><td style={{padding:'10px',fontSize:12,color:G.muted}}>{a.sport||'—'}</td><td style={{padding:'10px'}}>{a.grade||'—'}</td></tr>)}</tbody>
+        </table>:<Empty msg="No athletes found."/>}
+      </Card>
+    </div>;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ATTENDANCE
+  // ─────────────────────────────────────────────────────────────────────────
+  function AttendanceTab() {
+    const canEdit = user.role==='admin'||user.role==='coach';
+    const sportList = user.role==='coach'&&user.sport?[user.sport]:SPORTS.map(s=>s.key);
+    const teamAthletes = athletes.filter(u=>u.sport===attSport);
+    return <div>
+      <div style={s.pageHeader}><span style={s.pageTitle}>Attendance</span></div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:16}}>
+        {[{n:attendance.filter(a=>a.status==='present').length,l:'Present',c:G.green},{n:attendance.filter(a=>a.status==='absent').length,l:'Absences',c:G.red},{n:attendance.filter(a=>a.status==='tardy').length,l:'Tardies',c:G.gold}].map(({n,l,c})=><div key={l} style={s.statBlock}><div style={{...s.statNum,color:c}}>{n}</div><div style={s.statLbl}>{l}</div></div>)}
+      </div>
+      <Card style={{background:'#f0fdf4',border:`0.5px solid rgba(26,102,54,0.2)`}}><div style={{fontSize:13,color:G.green,lineHeight:1.6}}>⚡ <strong>Instant notifications:</strong> Parents receive Email + SMS the moment a student is marked absent or tardy.</div></Card>
+      {canEdit&&<Card><CardTitle>Take Attendance</CardTitle>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+          <div><label style={s.label}>Sport</label><select style={s.input} value={attSport} onChange={e=>setAttSport(e.target.value)}>{sportList.map(sp=><option key={sp} value={sp}>{sp}</option>)}</select></div>
+          <div><label style={s.label}>Date</label><input style={s.input} value={attDate} onChange={e=>setAttDate(e.target.value)}/></div>
+        </div>
+        {teamAthletes.length===0?<Empty msg="No athletes on this team yet."/>:
+          <div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr auto',gap:10,padding:'6px 0',borderBottom:`1px solid ${G.off}`,fontFamily:"'Oswald',sans-serif",fontSize:11,letterSpacing:'1px',textTransform:'uppercase',color:G.muted}}>
+              <div>Athlete</div><div>P / A / T</div>
+            </div>
+            {teamAthletes.map(a=>{
+              const ex = attendance.find(r=>r.athleteId===a.id&&r.date===attDate&&r.sport===attSport);
+              const st = ex?ex.status:'';
+              const ab=(status,label,bg,activeBg)=><button onClick={()=>markAttendance(a.id,a.name,a.sport,status)} style={{fontFamily:"'Oswald',sans-serif",fontSize:10,letterSpacing:'0.8px',padding:'4px 8px',borderRadius:5,cursor:'pointer',border:`0.5px solid transparent`,background:st===status?activeBg:bg,color:st===status?'#fff':{present:G.green,absent:G.red,tardy:'#854d0e'}[status],fontWeight:st===status?700:400}}>{label}</button>;
+              return <div key={a.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:`0.5px solid ${G.off}`}}>
+                <div style={{fontWeight:500,fontSize:13}}>{a.name} <span style={{fontSize:11,color:G.muted}}>#{a.jersey||'—'}</span></div>
+                <div style={{display:'flex',gap:5}}>{ab('present','P',G.greenBg,G.green)}{ab('absent','A',G.redBg,G.red)}{ab('tardy','T','#fef9c3','#b45309')}</div>
+              </div>;
+            })}
+          </div>}
+      </Card>}
+      <Card><CardTitle>Recent Log</CardTitle>
+        {attendance.slice(0,8).map(a=><div key={a.id} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:`0.5px solid ${G.off}`,fontSize:13}}>
+          <div style={{flex:1,fontWeight:500}}>{a.athleteName}</div>
+          <div style={{fontSize:12,color:G.muted}}>{a.sport}</div>
+          <div style={{fontSize:12,color:G.muted}}>{a.date}</div>
+          <span style={{fontSize:11,padding:'2px 8px',borderRadius:4,background:a.status==='present'?G.greenBg:a.status==='absent'?G.redBg:'#fef9c3',color:a.status==='present'?G.green:a.status==='absent'?G.red:'#854d0e'}}>{a.status}</span>
+        </div>)}
+      </Card>
+    </div>;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // HEALTH LOG
+  // ─────────────────────────────────────────────────────────────────────────
+  function HealthTab() {
+    const [modal, setModal] = useState(false);
+    const [f, setF] = useState({athleteId:'',type:'Sprain',location:'',status:'Active',notes:''});
+    const [filter, setFilter] = useState('All');
+    const sport = user.role==='coach'?user.sport:null;
+    const myInjuries = sport?injuries.filter(i=>i.sport===sport):injuries;
+    const filtered = filter==='All'?myInjuries:myInjuries.filter(i=>i.status===filter);
+    const teamAthletes = sport?athletes.filter(u=>u.sport===sport):athletes;
+    const statusColor = {Active:G.red,Recovering:G.orange,Cleared:G.green};
+    const save = async () => {
+      const athlete = teamAthletes.find(u=>u.id===f.athleteId);
+      if(!athlete){notify('Select an athlete.');return;}
+      await addInjury({...f,athleteName:athlete.name,sport:athlete.sport||sport,date:new Date().toLocaleDateString('en-US',{month:'short',day:'numeric'})});
+      setF({athleteId:'',type:'Sprain',location:'',status:'Active',notes:''});
+      setModal(false);
+    };
+    return <div>
+      <div style={s.pageHeader}><div><span style={s.pageTitle}>Health Log</span><span style={s.pageSub}>Private · Coaches & Admin only</span></div><Btn variant="gold" sm onClick={()=>setModal(true)}>+ New Record</Btn></div>
+      <Card style={{background:'#fef9c3',border:`0.5px solid rgba(133,77,14,0.3)`}}><div style={{fontSize:13,color:'#854d0e',lineHeight:1.6}}>🔒 <strong>Private.</strong> Only visible to coaches and admin. Never shown to athletes, parents, fans, or alumni.</div></Card>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:16}}>
+        {['Active','Recovering','Cleared'].map(st=><div key={st} style={s.statBlock}><div style={{...s.statNum,color:statusColor[st]}}>{myInjuries.filter(i=>i.status===st).length}</div><div style={s.statLbl}>{st}</div></div>)}
+      </div>
+      <FilterBar cats={['All','Active','Recovering','Cleared']} active={filter} onChange={setFilter}/>
+      <Card>
+        {filtered.length?filtered.map(inj=><div key={inj.id} style={{padding:'14px 0',borderBottom:`0.5px solid ${G.off}`}}>
+          <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:6}}>
+            <div><span style={{fontWeight:600,fontSize:14,color:G.black}}>{inj.athleteName}</span><span style={{fontSize:12,color:G.muted,marginLeft:8}}>{inj.sport}</span></div>
+            <span style={{fontFamily:"'Oswald',sans-serif",fontSize:11,padding:'2px 8px',borderRadius:4,background:inj.status==='Active'?G.redBg:inj.status==='Recovering'?G.orangeBg:G.greenBg,color:statusColor[inj.status]}}>{inj.status}</span>
+          </div>
+          <div style={{display:'flex',gap:8,marginBottom:6,flexWrap:'wrap'}}>
+            <span style={{fontSize:12,fontWeight:600,color:G.black}}>{inj.type}</span>
+            <span style={{fontSize:12,color:G.muted}}>· {inj.location} · {inj.date}</span>
+          </div>
+          <div style={{fontSize:13,color:'#555',lineHeight:1.5,background:G.off,borderRadius:6,padding:'8px 10px'}}>{inj.notes}</div>
+          <div style={{fontSize:11,color:G.muted,marginTop:4}}>Logged by {inj.coach}</div>
+        </div>):<Empty msg="No records found."/>}
+      </Card>
+      {modal&&<Modal title="New Health Record" onClose={()=>setModal(false)}>
+        <div style={{marginBottom:12}}><label style={s.label}>Athlete</label><select style={s.input} value={f.athleteId} onChange={e=>setF(x=>({...x,athleteId:e.target.value}))}><option value="">Select athlete...</option>{teamAthletes.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+          <div><label style={s.label}>Type</label><select style={s.input} value={f.type} onChange={e=>setF(x=>({...x,type:e.target.value}))}>{INJURY_TYPES.map(t=><option key={t}>{t}</option>)}</select></div>
+          <div><label style={s.label}>Status</label><select style={s.input} value={f.status} onChange={e=>setF(x=>({...x,status:e.target.value}))}>{INJURY_STATUS.map(t=><option key={t}>{t}</option>)}</select></div>
+        </div>
+        <div style={{marginBottom:12}}><label style={s.label}>Body Part / Location</label><input style={s.input} placeholder="e.g. Left ankle" value={f.location} onChange={e=>setF(x=>({...x,location:e.target.value}))}/></div>
+        <div style={{marginBottom:16}}><label style={s.label}>Notes (private)</label><textarea style={{...s.input,minHeight:90,resize:'vertical'}} placeholder="Injury details, treatment plan, restrictions..." value={f.notes} onChange={e=>setF(x=>({...x,notes:e.target.value}))}/></div>
+        <div style={{display:'flex',gap:8}}><Btn variant="primary" onClick={save}>Save Record</Btn><Btn variant="outline" onClick={()=>setModal(false)}>Cancel</Btn></div>
+      </Modal>}
+    </div>;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // BROADCAST
+  // ─────────────────────────────────────────────────────────────────────────
+  function BroadcastTab() {
+    const [modal, setModal] = useState(false);
+    const [f, setF] = useState({sport:'',title:'',message:''});
+    const coachSport = user.role==='coach'?user.sport:null;
+    const sportList = coachSport?[coachSport]:SPORTS.map(s=>s.key);
+    const myBroadcasts = coachSport?broadcasts.filter(b=>b.sport===coachSport):broadcasts;
+    const send = async () => {
+      if(!f.title||!f.message||!f.sport){notify('Fill in all fields.');return;}
+      await sendBroadcast(f.sport,f.title,f.message);
+      setF({sport:'',title:'',message:''});setModal(false);
+    };
+    const recipientCount = f.sport ? athletes.filter(u=>u.sport===f.sport).length + users.filter(u=>u.role==='parent'&&athletes.some(a=>a.sport===f.sport&&a.name===u.childName)).length : 0;
+    return <div>
+      <div style={s.pageHeader}><div><span style={s.pageTitle}>Mass Broadcast</span></div><Btn variant="gold" sm onClick={()=>setModal(true)}>+ New Broadcast</Btn></div>
+      <Card style={{background:G.blueBg,border:`0.5px solid rgba(30,64,175,0.2)`}}><div style={{fontSize:13,color:G.blue,lineHeight:1.6}}>📢 Broadcasts reach <strong>every athlete and parent</strong> on a team simultaneously via Email + SMS.</div></Card>
+      {myBroadcasts.length?myBroadcasts.map(b=><Card key={b.id}>
+        <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:8}}>
+          <div><div style={{fontFamily:"'Oswald',sans-serif",fontSize:14,fontWeight:600,color:G.black}}>{b.title}</div><div style={{fontSize:12,color:G.muted,marginTop:2}}>{b.sport} · By {b.sentBy}</div></div>
+          <span style={{fontFamily:"'Oswald',sans-serif",fontSize:11,background:G.greenBg,color:G.green,padding:'2px 8px',borderRadius:4,whiteSpace:'nowrap'}}>Sent to {b.recipientCount}</span>
+        </div>
+        <div style={{fontSize:13,color:'#555',lineHeight:1.5,background:G.off,borderRadius:6,padding:'10px 12px'}}>{b.message}</div>
+      </Card>):<Card><Empty msg="No broadcasts sent yet."/></Card>}
+      {modal&&<Modal title="New Broadcast" onClose={()=>setModal(false)}>
+        <div style={{marginBottom:12}}><label style={s.label}>Team</label><select style={s.input} value={f.sport} onChange={e=>setF(x=>({...x,sport:e.target.value}))}><option value="">Select team...</option>{sportList.map(sp=><option key={sp} value={sp}>{sp}</option>)}</select></div>
+        <div style={{marginBottom:12}}><label style={s.label}>Subject</label><input style={s.input} placeholder="e.g. Practice Cancelled" value={f.title} onChange={e=>setF(x=>({...x,title:e.target.value}))}/></div>
+        <div style={{marginBottom:12}}><label style={s.label}>Message</label><textarea style={{...s.input,minHeight:100,resize:'vertical'}} placeholder="Your message..." value={f.message} onChange={e=>setF(x=>({...x,message:e.target.value}))}/></div>
+        {f.sport&&<div style={{fontSize:13,color:G.blue,background:G.blueBg,padding:'8px 10px',borderRadius:6,marginBottom:14}}>Will send to <strong>{recipientCount} people</strong> via Email + SMS.</div>}
+        <div style={{display:'flex',gap:8}}><Btn variant="primary" onClick={send}>Send Now</Btn><Btn variant="outline" onClick={()=>setModal(false)}>Cancel</Btn></div>
+      </Modal>}
+    </div>;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // REMINDERS
+  // ─────────────────────────────────────────────────────────────────────────
+  function RemindersTab() {
+    const [modal, setModal] = useState(false);
+    const [f, setF] = useState({type:'game',sport:'',message:'',date:'',time:'6:00 PM'});
+    const coachSport = user.role==='coach'?user.sport:null;
+    const sportList = coachSport?[coachSport]:SPORTS.map(s=>s.key);
+    const myReminders = coachSport?reminders.filter(r=>r.sport===coachSport):reminders;
+    const typeIcons = {game:'🏟️',practice:'🏃',announcement:'📣'};
+    const save = async () => {
+      if(!f.sport||!f.message||!f.date){notify('Fill in all fields.');return;}
+      await scheduleReminder({...f});
+      setF({type:'game',sport:'',message:'',date:'',time:'6:00 PM'});setModal(false);
+    };
+    return <div>
+      <div style={s.pageHeader}><div><span style={s.pageTitle}>Reminders</span></div><Btn variant="gold" sm onClick={()=>setModal(true)}>+ Schedule</Btn></div>
+      <Card style={{background:G.goldPale,border:`0.5px solid rgba(201,150,26,0.3)`}}><div style={{fontSize:13,color:'#7A5200',lineHeight:1.6}}>⏰ Schedule reminders that automatically send to athletes & parents before games or practices.</div></Card>
+      {myReminders.length?myReminders.map(r=><div key={r.id} style={{display:'flex',gap:12,padding:'10px 0',borderBottom:`0.5px solid ${G.off}`,alignItems:'flex-start'}}>
+        <span style={{fontSize:20,flexShrink:0}}>{typeIcons[r.type]||'🔔'}</span>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:600,fontSize:13,color:G.black}}>{r.message}</div>
+          <div style={{fontSize:12,color:G.muted,marginTop:3}}>{r.sport} · {r.date} {r.time}</div>
+        </div>
+        <span style={{fontFamily:"'Oswald',sans-serif",fontSize:10,padding:'2px 7px',borderRadius:4,background:r.sent?G.greenBg:'#fef9c3',color:r.sent?G.green:'#854d0e',whiteSpace:'nowrap'}}>{r.sent?'Sent':'Scheduled'}</span>
+      </div>):<Card><Empty msg="No reminders yet."/></Card>}
+      {modal&&<Modal title="Schedule Reminder" onClose={()=>setModal(false)}>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+          <div><label style={s.label}>Type</label><select style={s.input} value={f.type} onChange={e=>setF(x=>({...x,type:e.target.value}))}><option value="game">Game Reminder</option><option value="practice">Practice Reminder</option><option value="announcement">Announcement Alert</option></select></div>
+          <div><label style={s.label}>Sport</label><select style={s.input} value={f.sport} onChange={e=>setF(x=>({...x,sport:e.target.value}))}><option value="">Select...</option>{sportList.map(sp=><option key={sp} value={sp}>{sp}</option>)}</select></div>
+        </div>
+        <div style={{marginBottom:12}}><label style={s.label}>Message</label><textarea style={{...s.input,minHeight:80,resize:'vertical'}} placeholder="Reminder message..." value={f.message} onChange={e=>setF(x=>({...x,message:e.target.value}))}/></div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:16}}>
+          <div><label style={s.label}>Date</label><input style={s.input} placeholder="e.g. Mar 20" value={f.date} onChange={e=>setF(x=>({...x,date:e.target.value}))}/></div>
+          <div><label style={s.label}>Time</label><input style={s.input} value={f.time} onChange={e=>setF(x=>({...x,time:e.target.value}))}/></div>
+        </div>
+        <div style={{display:'flex',gap:8}}><Btn variant="primary" onClick={save}>Schedule</Btn><Btn variant="outline" onClick={()=>setModal(false)}>Cancel</Btn></div>
+      </Modal>}
+    </div>;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // PHOTOS
+  // ─────────────────────────────────────────────────────────────────────────
+  function PhotoTab() {
+    const [modal, setModal] = useState(false);
+    const [upTitle, setUpTitle] = useState('');
+    const [upCat, setUpCat] = useState('Game Action');
+    const [upSport, setUpSport] = useState('ALL');
+    const [upFile, setUpFile] = useState(null);
+    const [upPreview, setUpPreview] = useState(null);
+    const [uploading, setUploading] = useState(false);
+    const fileRef = useRef();
+    const canApprove = user.role==='admin'||user.role==='coach';
+    const handleFile = e => {
+      const f = e.target.files[0]; if(!f) return;
+      setUpFile(f);
+      const r = new FileReader(); r.onload = ev => setUpPreview(ev.target.result); r.readAsDataURL(f);
+    };
+    const submit = async () => {
+      setUploading(true);
+      await uploadPhoto(upTitle, upCat, upSport, upFile);
+      setUpTitle(''); setUpCat('Game Action'); setUpSport('ALL'); setUpFile(null); setUpPreview(null);
+      setModal(false); setUploading(false);
+    };
+    return <div>
+      <div style={s.pageHeader}><div><span style={s.pageTitle}>Photo Gallery</span><span style={s.pageSub}>{photos.length} photos</span></div><Btn variant="gold" sm onClick={()=>setModal(true)}>+ Upload</Btn></div>
+      {canApprove&&pendingPhotos.length>0&&<Card style={{borderColor:'rgba(201,150,26,0.4)'}}>
+        <div style={{...s.cardTitle,display:'flex',alignItems:'center',justifyContent:'space-between'}}>Pending Review<span style={{background:G.goldPale,color:G.gold,fontSize:11,fontFamily:"'Oswald',sans-serif",padding:'2px 8px',borderRadius:4}}>{pendingPhotos.length}</span></div>
+        {pendingPhotos.map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',borderBottom:`0.5px solid ${G.off}`}}>
+          {p.storageUrl&&<img src={p.storageUrl} alt={p.title} style={{width:52,height:52,borderRadius:7,objectFit:'cover',flexShrink:0}}/>}
+          <div style={{flex:1}}><div style={{fontWeight:600,fontSize:14}}>{p.title}</div><div style={{fontSize:12,color:G.muted}}>{p.cat||p.category} · {p.uploader}</div></div>
+          <div style={{display:'flex',gap:6}}><Btn variant="gold" sm onClick={()=>approvePhoto(p.id)}>Approve</Btn><Btn variant="danger" sm onClick={()=>rejectPhoto(p.id)}>Decline</Btn></div>
+        </div>)}
+      </Card>}
+      <FilterBar cats={['All',...PHOTO_CATS]} active={photoCat} onChange={setPhotoCat}/>
+      {visiblePhotos.length?<PhotoGrid photos={visiblePhotos} onPhotoClick={i=>setLbIdx(i)}/>:<Card><Empty msg="No photos in this category yet."/></Card>}
+      {lbIdx!==null&&<Lightbox photos={visiblePhotos} idx={lbIdx} onClose={()=>setLbIdx(null)} onNav={d=>setLbIdx(i=>(i+d+visiblePhotos.length)%visiblePhotos.length)}/>}
+      {modal&&<Modal title="Upload Photo" onClose={()=>setModal(false)}>
+        <div onClick={()=>fileRef.current.click()} style={{border:`1.5px dashed rgba(201,150,26,0.4)`,borderRadius:10,padding:'24px 20px',textAlign:'center',cursor:'pointer',background:G.goldPale,marginBottom:12}}>
+          <div style={{fontSize:32,marginBottom:8}}>📷</div>
+          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:14,fontWeight:500,color:G.black}}>{upFile?upFile.name:'Click to choose a photo'}</div>
+          <div style={{fontSize:12,color:G.muted,marginTop:4}}>JPG, PNG or GIF</div>
+        </div>
+        <input ref={fileRef} type="file" accept="image/*" style={{display:'none'}} onChange={handleFile}/>
+        {upPreview&&<img src={upPreview} style={{width:'100%',height:140,objectFit:'cover',borderRadius:8,marginBottom:12}} alt="preview"/>}
+        <div style={{marginBottom:12}}><label style={s.label}>Title</label><input style={s.input} placeholder="e.g. Football vs. Carter HS" value={upTitle} onChange={e=>setUpTitle(e.target.value)}/></div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+          <div><label style={s.label}>Category</label><select style={s.input} value={upCat} onChange={e=>setUpCat(e.target.value)}>{PHOTO_CATS.map(c=><option key={c}>{c}</option>)}</select></div>
+          <div><label style={s.label}>Sport</label><select style={s.input} value={upSport} onChange={e=>setUpSport(e.target.value)}><option value="ALL">All Sports</option>{SPORTS.map(sp=><option key={sp.key} value={sp.key}>{sp.key}</option>)}</select></div>
+        </div>
+        <div style={{fontSize:12,color:G.muted,marginBottom:14}}>Photos require coach/admin approval before going live.</div>
+        <div style={{display:'flex',gap:8}}><Btn variant="primary" onClick={submit} disabled={uploading}>{uploading?'Uploading...':'Submit for Review'}</Btn><Btn variant="outline" onClick={()=>setModal(false)}>Cancel</Btn></div>
+      </Modal>}
+    </div>;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // COMMUNITY / FAN ZONE
+  // ─────────────────────────────────────────────────────────────────────────
+  function CommunityTab() {
+    const [scoreModal, setScoreModal] = useState(false);
+    const [sf, setSf] = useState({gameId:'',us:'',them:'',quarter:'4th'});
+    const canUpdate = user.role==='coach'||user.role==='admin';
+    const save = async () => {
+      if(!sf.gameId) return;
+      await updateLiveScore(sf.gameId, parseInt(sf.us)||0, parseInt(sf.them)||0, sf.quarter);
+      setScoreModal(false);
+    };
+    return <div>
+      <div style={s.pageHeader}><div><span style={s.pageTitle}>Fan Zone</span></div>{canUpdate&&<Btn variant="gold" sm onClick={()=>setScoreModal(true)}>📡 Update Score</Btn>}</div>
+      {liveGames.length>0&&<Card style={{border:`1.5px solid ${G.red}`,background:'#fff8f8'}}>
+        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14}}>
+          <span style={{background:G.red,color:'#fff',fontSize:10,fontFamily:"'Oswald',sans-serif",fontWeight:700,padding:'2px 8px',borderRadius:4,letterSpacing:'1px'}}>● LIVE</span>
+          <span style={{fontFamily:"'Oswald',sans-serif",fontSize:13,fontWeight:600,color:G.black,letterSpacing:'0.5px',textTransform:'uppercase'}}>Live Games</span>
+        </div>
+        {liveGames.map(g=><div key={g.id} style={{padding:'14px',background:G.off,borderRadius:8,marginBottom:8}}>
+          <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}><div style={{fontSize:13,color:G.muted}}>{g.sport}</div><div style={{fontSize:11,color:G.muted}}>{g.liveScore?.quarter}</div></div>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+            <div style={{textAlign:'center'}}><div style={{fontFamily:"'Oswald',sans-serif",fontSize:13,fontWeight:600,color:G.black}}>VIKINGS</div><div style={{fontFamily:"'Oswald',sans-serif",fontSize:42,fontWeight:700,color:G.gold,lineHeight:1}}>{g.liveScore?.us}</div></div>
+            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,color:G.muted}}>—</div>
+            <div style={{textAlign:'center'}}><div style={{fontFamily:"'Oswald',sans-serif",fontSize:13,fontWeight:600,color:G.black}}>{g.opponent.replace('vs. ','').replace('@ ','')}</div><div style={{fontFamily:"'Oswald',sans-serif",fontSize:42,fontWeight:700,color:G.black,lineHeight:1}}>{g.liveScore?.them}</div></div>
+          </div>
+        </div>)}
+      </Card>}
+      <Card><CardTitle>Upcoming Games</CardTitle>{schedules.filter(g=>!g.liveScore?.live).slice(0,5).map(g=><GameItem key={g.id} g={g}/>)||<Empty/>}</Card>
+      <Card style={{background:G.goldPale,border:`0.5px solid rgba(201,150,26,0.3)`}}>
+        <CardTitle>🛍️ Vikings Spirit Store</CardTitle>
+        <div style={{fontSize:13,color:'#7A5200',lineHeight:1.6,marginBottom:12}}>Show your Vikings pride! Shop official Pinkston gear.</div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:14}}>
+          {[{item:'Vikings Hoodie',price:'$45',emoji:'👕'},{item:'Dad Hat',price:'$22',emoji:'🧢'},{item:'Car Decal',price:'$8',emoji:'🏷️'}].map(p=><div key={p.item} style={{background:G.white,borderRadius:8,padding:'12px 8px',textAlign:'center',border:`0.5px solid rgba(0,0,0,0.08)`}}><div style={{fontSize:28,marginBottom:6}}>{p.emoji}</div><div style={{fontSize:12,fontWeight:600,color:G.black,marginBottom:2}}>{p.item}</div><div style={{fontFamily:"'Oswald',sans-serif",fontSize:14,color:G.gold}}>{p.price}</div></div>)}
+        </div>
+        <Btn variant="primary" sm onClick={()=>notify('Spirit store link — add your store URL here before launch!')}>Visit Spirit Store →</Btn>
+      </Card>
+      <Card style={{background:G.off}}>
+        <CardTitle>🏆 Booster Club</CardTitle>
+        <div style={{fontSize:13,color:G.muted,lineHeight:1.6,marginBottom:12}}>Support the Vikings! Booster club sign-up coming soon.</div>
+        <div style={{display:'flex',gap:10,alignItems:'center'}}>
+          <input style={{...s.input,flex:1}} placeholder="your@email.com — notify me when live"/>
+          <Btn variant="gold" sm onClick={()=>notify('Added to the list!')}>Notify Me</Btn>
+        </div>
+      </Card>
+      {scoreModal&&<Modal title="Update Live Score" onClose={()=>setScoreModal(false)}>
+        <div style={{marginBottom:12}}><label style={s.label}>Game</label><select style={s.input} value={sf.gameId} onChange={e=>setSf(x=>({...x,gameId:e.target.value}))}><option value="">Select game...</option>{schedules.map(g=><option key={g.id} value={g.id}>{g.sport} — {g.opponent} {g.month} {g.day}</option>)}</select></div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+          <div><label style={s.label}>Vikings Score</label><input style={s.input} type="number" placeholder="45" value={sf.us} onChange={e=>setSf(x=>({...x,us:e.target.value}))}/></div>
+          <div><label style={s.label}>Opponent Score</label><input style={s.input} type="number" placeholder="38" value={sf.them} onChange={e=>setSf(x=>({...x,them:e.target.value}))}/></div>
+        </div>
+        <div style={{marginBottom:16}}><label style={s.label}>Period</label><select style={s.input} value={sf.quarter} onChange={e=>setSf(x=>({...x,quarter:e.target.value}))}>{['1st','2nd','3rd','4th','OT','Final'].map(q=><option key={q}>{q}</option>)}</select></div>
+        <div style={{display:'flex',gap:8}}><Btn variant="primary" onClick={save}>Update</Btn><Btn variant="outline" onClick={()=>setScoreModal(false)}>Cancel</Btn></div>
+      </Modal>}
+    </div>;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // STATS
+  // ─────────────────────────────────────────────────────────────────────────
+  function StatsTab() {
+    return <div>
+      <div style={s.pageHeader}><span style={s.pageTitle}>Statistics</span></div>
+      <StatGrid stats={[{num:schedules.filter(g=>g.badge==='win').length,lbl:'Team Wins'},{num:SPORTS.length,lbl:'Programs'},{num:athletes.length,lbl:'Athletes'}]}/>
+      <Card><CardTitle>Season Leaders</CardTitle>
+        {[{name:'Marcus J.',sport:'Football · QB',stat:'1,840 YDS'},{name:'DeShawn W.',sport:"Men's Basketball",stat:'22.4 PPG'},{name:'Aaliyah M.',sport:"Women's Soccer · F",stat:'14 Goals'},{name:'Jordan B.',sport:'Wrestling',stat:'22–2 Rec.'},{name:'Destiny C.',sport:"Women's Track",stat:'11.8s 100m'}].map(l=><div key={l.name} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'9px 0',borderBottom:`0.5px solid ${G.off}`,fontSize:13}}><div><div style={{fontWeight:600,color:G.black}}>{l.name}</div><div style={{fontSize:11,color:G.muted}}>{l.sport}</div></div><div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:600,color:G.gold}}>{l.stat}</div></div>)}
+      </Card>
+    </div>;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // MESSAGES
+  // ─────────────────────────────────────────────────────────────────────────
+  function MessagesTab() {
+    const canMsg = user.role==='coach'||user.role==='parent'||user.role==='admin';
+    const [newModal, setNewModal] = useState(false);
+    const [newCoachId, setNewCoachId] = useState('');
+    const [newMsgText, setNewMsgText] = useState('');
+    const coaches = users.filter(u=>u.role==='coach');
+    const threadIdFor = (a,b) => [a,b].sort().join('_');
+
+    // Get my threads by looking at all messages
+    const myThreads = {};
+    messages.forEach(m => {
+      if(m.senderId===user.id||m.receiverId===user.id) {
+        const otherId = m.senderId===user.id?m.receiverId:m.senderId;
+        const tid = threadIdFor(user.id, otherId);
+        if(!myThreads[tid]) myThreads[tid] = {threadId:tid, otherId, msgs:[]};
+        myThreads[tid].msgs.push(m);
+      }
+    });
+
+    const threadList = Object.values(myThreads).map(t => ({
+      ...t,
+      other: users.find(u=>u.id===t.otherId)||{name:'Unknown',role:''},
+      lastMsg: t.msgs[t.msgs.length-1],
+      unread: t.msgs.filter(m=>m.receiverId===user.id&&!m.read).length,
+    }));
+
+    const activeMessages = activeThread ? messages.filter(m=>m.threadId===activeThread) : [];
+    const otherUserId = activeMessages.length ? (activeMessages[0].senderId===user.id?activeMessages[0].receiverId:activeMessages[0].senderId) : null;
+    const other = users.find(u=>u.id===otherUserId);
+
+    const startNewThread = async () => {
+      if(!newCoachId||!newMsgText.trim()) return;
+      const tid = threadIdFor(user.id, newCoachId);
+      await fdb.add(`threads/${tid}/messages`,{senderId:user.id,senderName:user.name,receiverId:newCoachId,text:newMsgText.trim()});
+      setActiveThread(tid);
+      setNewModal(false); setNewMsgText('');
+      notify('Message sent!');
+    };
+
+    if(!canMsg) return <div><div style={s.pageHeader}><span style={s.pageTitle}>Messages</span></div><Card><Empty msg="Messaging is available for coaches, parents, and admins."/></Card></div>;
+
+    return <div>
+      <div style={s.pageHeader}><span style={s.pageTitle}>Messages</span>{user.role==='parent'&&<Btn variant="gold" sm onClick={()=>setNewModal(true)}>+ New</Btn>}</div>
+      <div style={{display:'grid',gridTemplateColumns:'220px 1fr',gap:12,height:520}}>
+        <div style={{background:G.white,borderRadius:10,border:`0.5px solid rgba(0,0,0,0.08)`,overflowY:'auto'}}>
+          {threadList.length?threadList.map(t=><div key={t.threadId} onClick={()=>setActiveThread(t.threadId)} style={{padding:'12px 14px',borderBottom:`0.5px solid ${G.off}`,cursor:'pointer',background:activeThread===t.threadId?G.goldPale:G.white,borderLeft:activeThread===t.threadId?`3px solid ${G.gold}`:'3px solid transparent'}}>
+            <div style={{fontWeight:600,fontSize:13,color:G.black}}>{t.other.name}{t.unread>0&&<span style={{background:G.gold,color:G.black,fontSize:9,fontFamily:"'Oswald',sans-serif",fontWeight:700,padding:'1px 5px',borderRadius:8,marginLeft:5}}>{t.unread}</span>}</div>
+            <div style={{fontSize:12,color:G.muted,marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{t.lastMsg?.text}</div>
+          </div>):<div style={{padding:16,fontSize:13,color:G.muted}}>No conversations yet.</div>}
+        </div>
+        <div style={{background:G.white,borderRadius:10,border:`0.5px solid rgba(0,0,0,0.08)`,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+          {activeThread&&other?<>
+            <div style={{padding:'14px 16px',borderBottom:`0.5px solid ${G.off}`,flexShrink:0}}>
+              <div style={{fontWeight:600,fontSize:15,color:G.black}}>{other.name}</div>
+              <div style={{fontSize:12,color:G.muted}}><Badge role={other.role}>{other.role}</Badge>{other.sport?' · '+other.sport:''}</div>
+            </div>
+            <div ref={chatRef} style={{flex:1,overflowY:'auto',padding:16,display:'flex',flexDirection:'column',gap:10}}>
+              {activeMessages.map(m=>{const out=m.senderId===user.id;return <div key={m.id}><div style={{maxWidth:'75%',padding:'10px 13px',borderRadius:12,fontSize:13,lineHeight:1.5,background:out?G.black:G.off,color:out?G.gold:G.black,marginLeft:out?'auto':0,borderBottomRightRadius:out?3:12,borderBottomLeftRadius:out?12:3}}>{m.text}</div></div>;})}
+            </div>
+            <div style={{padding:'12px 14px',borderTop:`0.5px solid ${G.off}`,display:'flex',gap:8,flexShrink:0}}>
+              <input value={msgInput} onChange={e=>setMsgInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){sendMessage(activeThread,otherUserId);setMsgInput('');}}} placeholder="Type a message..." style={{flex:1,padding:'9px 12px',border:`0.5px solid rgba(0,0,0,0.15)`,borderRadius:20,fontSize:13,outline:'none'}}/>
+              <button onClick={()=>{sendMessage(activeThread,otherUserId);setMsgInput('');}} style={{background:G.black,color:G.gold,border:'none',borderRadius:20,padding:'9px 16px',fontFamily:"'Oswald',sans-serif",fontSize:12,letterSpacing:'0.8px',cursor:'pointer'}}>Send</button>
+            </div>
+          </>:<div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',color:G.muted,fontSize:14}}>Select a conversation</div>}
+        </div>
+      </div>
+      {newModal&&<Modal title="New Message" onClose={()=>setNewModal(false)}>
+        <div style={{marginBottom:12}}><label style={s.label}>Send to Coach</label><select style={s.input} value={newCoachId} onChange={e=>setNewCoachId(e.target.value)}><option value="">Select coach...</option>{coaches.map(c=><option key={c.id} value={c.id}>{c.name}{c.sport?' ('+c.sport+')':''}</option>)}</select></div>
+        <div style={{marginBottom:16}}><label style={s.label}>Message</label><textarea style={{...s.input,minHeight:80,resize:'vertical'}} value={newMsgText} onChange={e=>setNewMsgText(e.target.value)} placeholder="Type your message..."/></div>
+        <div style={{display:'flex',gap:8}}><Btn variant="primary" onClick={startNewThread}>Send</Btn><Btn variant="outline" onClick={()=>setNewModal(false)}>Cancel</Btn></div>
+      </Modal>}
+    </div>;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // APPROVALS
+  // ─────────────────────────────────────────────────────────────────────────
+  function ApprovalsTab() {
+    return <div>
+      <div style={s.pageHeader}><span style={s.pageTitle}>Approvals</span><span style={s.pageSub}>{pendingUsers.length+pendingPhotos.length} pending</span></div>
+      {pendingPhotos.length>0&&<Card>
+        <CardTitle>Photos ({pendingPhotos.length})</CardTitle>
+        {pendingPhotos.map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',borderBottom:`0.5px solid ${G.off}`}}>
+          {p.storageUrl&&<img src={p.storageUrl} alt={p.title} style={{width:52,height:52,borderRadius:7,objectFit:'cover',flexShrink:0}}/>}
+          <div style={{flex:1}}><div style={{fontWeight:600,fontSize:14}}>{p.title}</div><div style={{fontSize:12,color:G.muted}}>{p.cat||p.category} · {p.uploader}</div></div>
+          <div style={{display:'flex',gap:6}}><Btn variant="gold" sm onClick={()=>approvePhoto(p.id)}>Approve</Btn><Btn variant="danger" sm onClick={()=>rejectPhoto(p.id)}>Decline</Btn></div>
+        </div>)}
+      </Card>}
+      <Card>
+        <CardTitle>Users ({pendingUsers.length})</CardTitle>
+        {pendingUsers.length?pendingUsers.map(u=><div key={u.id} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',borderBottom:`0.5px solid ${G.off}`}}>
+          <div style={{flex:1}}><div style={{fontWeight:600,fontSize:14}}>{u.name} <Badge role={u.role}>{u.role}</Badge></div><div style={{fontSize:12,color:G.muted}}>{u.email}{u.sport?' · '+u.sport:''}{u.childName?' · Parent of '+u.childName:''}</div></div>
+          <div style={{display:'flex',gap:6}}><Btn variant="gold" sm onClick={()=>approveUser(u.id)}>Approve</Btn><Btn variant="danger" sm onClick={()=>rejectUser(u.id)}>Decline</Btn></div>
+        </div>):<Empty msg="No pending users."/>}
+      </Card>
+    </div>;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // NOTIFICATIONS
+  // ─────────────────────────────────────────────────────────────────────────
+  function NotificationsTab() {
+    const typeIcons = {absent:'🔴',tardy:'🟡',reminder:'🔔',broadcast:'📢'};
+    return <div>
+      <div style={s.pageHeader}><span style={s.pageTitle}>Notifications</span></div>
+      <Card>{myNotifications.length?myNotifications.map(n=><div key={n.id} style={{display:'flex',gap:12,padding:'10px 0',borderBottom:`0.5px solid ${G.off}`}}>
+        <span style={{fontSize:16,flexShrink:0,marginTop:1}}>{typeIcons[n.type]||'📩'}</span>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:600,color:G.black}}>{n.athleteName||'Notification'}</div>
+          <div style={{color:G.muted,fontSize:12}}>{n.type} · {n.sport} · {n.date}</div>
+          {n.message&&<div style={{fontSize:13,color:'#555',marginTop:2,lineHeight:1.5}}>{n.message}</div>}
+          <div style={{fontSize:11,color:G.muted,marginTop:2}}>📧 Email + 📱 SMS sent</div>
+        </div>
+      </div>):<Empty msg="No notifications yet."/>}</Card>
+    </div>;
+  }
+
+  return renderTab();
+}
