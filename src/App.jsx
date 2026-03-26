@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { initializeApp } from "firebase/app";
 import {
   getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
-  onAuthStateChanged, signOut
+  onAuthStateChanged, signOut, sendPasswordResetEmail
 } from "firebase/auth";
 import {
   getFirestore, collection, doc, addDoc, setDoc, getDoc, getDocs,
@@ -240,6 +240,11 @@ export default function App() {
   const [loginPw, setLoginPw] = useState('');
   const [loginErr, setLoginErr] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
+  const [showReset, setShowReset] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetMsg, setResetMsg] = useState('');
+  const [resetErr, setResetErr] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
 
   const doLogin = async () => {
     setLoginErr(''); setLoginLoading(true);
@@ -252,6 +257,18 @@ export default function App() {
     setLoginLoading(false);
   };
 
+  const doResetPassword = async () => {
+    setResetErr(''); setResetMsg(''); setResetLoading(true);
+    if(!resetEmail){setResetErr('Please enter your email address.');setResetLoading(false);return;}
+    try {
+      await sendPasswordResetEmail(auth, resetEmail);
+      setResetMsg('Password reset email sent! Check your inbox and follow the link to reset your password.');
+    } catch(e) {
+      setResetErr(e.code==='auth/user-not-found'?'No account found with that email address.':e.code==='auth/invalid-email'?'Please enter a valid email address.':e.message);
+    }
+    setResetLoading(false);
+  };
+
   const doLogout = async () => {
     await signOut(auth);
     setTab('dashboard');
@@ -259,14 +276,40 @@ export default function App() {
   };
 
   // ── REGISTER ──
-  const [regF, setRegF] = useState({first:'',last:'',email:'',phone:'',pw:'',grade:'9th',jersey:'',sport:'',childName:'',gradYear:'',sportPlayed:''});
+  const [regF, setRegF] = useState({first:'',last:'',email:'',phone:'',pw:'',grade:'9th',jersey:'',sport:'',childName:'',childId:'',gradYear:'',sportPlayed:''});
   const [regErr, setRegErr] = useState('');
   const [regLoading, setRegLoading] = useState(false);
+  const [athleteSearch, setAthleteSearch] = useState('');
+  const [athleteResults, setAthleteResults] = useState([]);
+  const [athleteSearchLoading, setAthleteSearchLoading] = useState(false);
+
+  // Live athlete search for parent registration
+  const searchAthletes = async (term) => {
+    setAthleteSearch(term);
+    setRegF(f=>({...f, childName: term, childId: ''}));
+    if(term.length < 2) { setAthleteResults([]); return; }
+    setAthleteSearchLoading(true);
+    try {
+      const snap = await getDocs(query(collection(db,'users'), where('role','==','athlete'), where('approved','==',true)));
+      const matches = snap.docs
+        .map(d=>({id:d.id,...d.data()}))
+        .filter(u=>u.name?.toLowerCase().includes(term.toLowerCase()));
+      setAthleteResults(matches.slice(0,5));
+    } catch(e) { setAthleteResults([]); }
+    setAthleteSearchLoading(false);
+  };
+
+  const selectAthlete = (athlete) => {
+    setAthleteSearch(athlete.name);
+    setRegF(f=>({...f, childName: athlete.name, childId: athlete.id}));
+    setAthleteResults([]);
+  };
 
   const doRegister = async () => {
     setRegErr(''); setRegLoading(true);
     if(!regF.first||!regF.email||!regF.pw){setRegErr('Please fill in all required fields.');setRegLoading(false);return;}
     if(regF.pw.length<6){setRegErr('Password must be at least 6 characters.');setRegLoading(false);return;}
+    if(regRole==='parent'&&!regF.childName){setRegErr('Please search for and select your child.');setRegLoading(false);return;}
     try {
       const cred = await createUserWithEmailAndPassword(auth, regF.email, regF.pw);
       const uid = cred.user.uid;
@@ -280,7 +323,7 @@ export default function App() {
         createdAt: serverTimestamp(),
         ...(regRole==='athlete'?{sport:null,jersey:regF.jersey,grade:regF.grade}:{}),
         ...(regRole==='coach'?{sport:regF.sport}:{}),
-        ...(regRole==='parent'?{childName:regF.childName}:{}),
+        ...(regRole==='parent'?{childName:regF.childName, childId:regF.childId||null}:{}),
         ...(regRole==='alumni'?{gradYear:regF.gradYear,sportPlayed:regF.sportPlayed}:{}),
       };
       await fdb.set('users', uid, profile);
@@ -336,15 +379,42 @@ export default function App() {
           </div>
 
           {authMode==='login' ? (
+            showReset ? (
+              <Card>
+                <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16}}>
+                  <button onClick={()=>{setShowReset(false);setResetMsg('');setResetErr('');}} style={{background:'none',border:'none',cursor:'pointer',fontSize:18,color:G.muted,padding:0}}>←</button>
+                  <CardTitle style={{margin:0}}>Reset Password</CardTitle>
+                </div>
+                {resetMsg ? (
+                  <div style={{background:G.greenBg,border:`0.5px solid rgba(26,102,54,0.2)`,borderRadius:8,padding:'14px',fontSize:13,color:G.green,lineHeight:1.6}}>
+                    ✅ {resetMsg}
+                    <div style={{marginTop:12}}><button onClick={()=>{setShowReset(false);setResetMsg('');}} style={{...s.btn('primary'),...s.btnSm}}>Back to Sign In</button></div>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{fontSize:13,color:'#555',lineHeight:1.6,marginBottom:16}}>Enter the email address you registered with and we'll send you a link to reset your password.</div>
+                    <div style={{marginBottom:12}}>
+                      <label style={s.label}>Email Address</label>
+                      <input style={s.input} type="email" placeholder="your@email.com" value={resetEmail} onChange={e=>setResetEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&doResetPassword()}/>
+                    </div>
+                    {resetErr&&<div style={{color:G.red,fontSize:13,marginBottom:12,background:G.redBg,padding:'8px 12px',borderRadius:6}}>{resetErr}</div>}
+                    <Btn variant="primary" style={{width:'100%'}} onClick={doResetPassword} disabled={resetLoading}>{resetLoading?'Sending...':'Send Reset Link'}</Btn>
+                  </>
+                )}
+              </Card>
+            ) : (
             <Card>
               <CardTitle>Welcome Back, Vikings</CardTitle>
               <div style={{marginBottom:12}}>
                 <label style={s.label}>Email</label>
                 <input style={s.input} type="email" placeholder="your@email.com" value={loginEmail} onChange={e=>setLoginEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&doLogin()}/>
               </div>
-              <div style={{marginBottom:16}}>
+              <div style={{marginBottom:6}}>
                 <label style={s.label}>Password</label>
                 <input style={s.input} type="password" placeholder="••••••••" value={loginPw} onChange={e=>setLoginPw(e.target.value)} onKeyDown={e=>e.key==='Enter'&&doLogin()}/>
+              </div>
+              <div style={{textAlign:'right',marginBottom:16}}>
+                <button onClick={()=>{setShowReset(true);setResetEmail(loginEmail);setResetErr('');setResetMsg('');}} style={{background:'none',border:'none',cursor:'pointer',fontSize:12,color:G.gold,fontFamily:"'Source Sans 3',sans-serif",textDecoration:'underline',padding:0}}>Forgot password?</button>
               </div>
               {loginErr&&<div style={{color:G.red,fontSize:13,marginBottom:12,background:G.redBg,padding:'8px 12px',borderRadius:6}}>{loginErr}</div>}
               <Btn variant="primary" style={{width:'100%'}} onClick={doLogin} disabled={loginLoading}>{loginLoading?'Signing in...':'Sign In'}</Btn>
@@ -353,6 +423,7 @@ export default function App() {
                 <div style={{fontSize:13,color:'#555',lineHeight:1.6}}>Click <strong>Register</strong> above to create your account. Coaches, athletes, and parents need admin approval before accessing the app.</div>
               </div>
             </Card>
+            )
           ) : (
             <Card>
               <CardTitle>Create Account</CardTitle>
@@ -379,7 +450,19 @@ export default function App() {
                 <div><label style={s.label}>Jersey #</label><input style={s.input} placeholder="12" value={regF.jersey} onChange={e=>setRegF(f=>({...f,jersey:e.target.value}))}/></div>
               </div>}
               {regRole==='coach'&&<div style={{marginBottom:12}}><label style={s.label}>Sport</label><select style={s.input} value={regF.sport} onChange={e=>setRegF(f=>({...f,sport:e.target.value}))}><option value="">Select sport...</option>{SPORTS.map(sp=><option key={sp.key} value={sp.key}>{sp.key}</option>)}</select></div>}
-              {regRole==='parent'&&<div style={{marginBottom:12}}><label style={s.label}>Athlete's Full Name</label><input style={s.input} placeholder="Your child's full name" value={regF.childName} onChange={e=>setRegF(f=>({...f,childName:e.target.value}))}/></div>}
+              {regRole==='parent'&&<div style={{marginBottom:12,position:'relative'}}>
+                <label style={s.label}>Search for Your Child</label>
+                <input style={s.input} placeholder="Type your child's name..." value={athleteSearch} onChange={e=>searchAthletes(e.target.value)}/>
+                {regF.childId&&<div style={{fontSize:12,color:G.green,marginTop:4}}>✅ Linked to {regF.childName}</div>}
+                {!regF.childId&&athleteSearch.length>=2&&athleteResults.length===0&&!athleteSearchLoading&&<div style={{fontSize:12,color:G.muted,marginTop:4}}>No athletes found. Admin will link your account manually.</div>}
+                {athleteSearchLoading&&<div style={{fontSize:12,color:G.muted,marginTop:4}}>Searching...</div>}
+                {athleteResults.length>0&&<div style={{position:'absolute',top:'100%',left:0,right:0,background:G.white,border:'0.5px solid rgba(0,0,0,0.15)',borderRadius:7,zIndex:100,boxShadow:'0 4px 12px rgba(0,0,0,0.1)'}}>
+                  {athleteResults.map(a=><div key={a.id} onClick={()=>selectAthlete(a)} style={{padding:'10px 12px',cursor:'pointer',borderBottom:'0.5px solid #f2f0ec',fontSize:13,display:'flex',alignItems:'center',justifyContent:'space-between'}} onMouseEnter={e=>e.currentTarget.style.background='#fdf3d8'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                    <span style={{fontWeight:600,color:'#0d0d0d'}}>{a.name}</span>
+                    <span style={{fontSize:11,color:'#888'}}>{a.sport||'No sport yet'} · Grade {a.grade||'—'}</span>
+                  </div>)}
+                </div>}
+              </div>}
               {regRole==='alumni'&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
                 <div><label style={s.label}>Grad Year</label><input style={s.input} placeholder="2018" value={regF.gradYear} onChange={e=>setRegF(f=>({...f,gradYear:e.target.value}))}/></div>
                 <div><label style={s.label}>Sport Played</label><input style={s.input} placeholder="Football" value={regF.sportPlayed} onChange={e=>setRegF(f=>({...f,sportPlayed:e.target.value}))}/></div>
@@ -495,17 +578,48 @@ function AppContent({user, tab, setTab, notify, fdb, db, storage, storageRef, up
   // ── SUBSCRIBE TO FIRESTORE ──
   useEffect(()=>{
     const unsubs = [];
+    const isParent = user.role==='parent';
+    const isFanAlum = user.role==='fan'||user.role==='alumni';
+
     unsubs.push(fdb.listen('schedules',[orderBy('createdAt','desc')],setSchedules));
     unsubs.push(fdb.listen('announcements',[orderBy('createdAt','desc')],setAnnouncements));
-    unsubs.push(fdb.listen('attendance',[],setAttendance));
     unsubs.push(fdb.listen('photos',[where('approved','==',true)],setPhotos));
-    unsubs.push(fdb.listen('photos',[where('approved','==',false)],setPendingPhotos));
-    unsubs.push(fdb.listen('injuries',[orderBy('createdAt','desc')],setInjuries));
-    unsubs.push(fdb.listen('broadcasts',[orderBy('createdAt','desc')],setBroadcasts));
-    unsubs.push(fdb.listen('reminders',[orderBy('createdAt','desc')],setReminders));
-    unsubs.push(fdb.listen('users',[where('approved','==',true)],setUsers));
-    unsubs.push(fdb.listen('users',[where('approved','==',false)],setPendingUsers));
-    unsubs.push(fdb.listen('notifications',[orderBy('createdAt','desc')],setNotifications));
+
+    // Parents only pull their own child's attendance
+    if(isParent) {
+      const childId = user.childId||null;
+      const childName = user.childName||'';
+      if(childId) {
+        unsubs.push(fdb.listen('attendance',[where('athleteId','==',childId)],setAttendance));
+      } else if(childName) {
+        unsubs.push(fdb.listen('attendance',[where('athleteName','==',childName)],setAttendance));
+      } else {
+        setAttendance([]);
+      }
+      // Parents only pull their own notifications
+      if(user.id) {
+        unsubs.push(fdb.listen('notifications',[where('parentId','==',user.id),orderBy('createdAt','desc')],setNotifications));
+      } else {
+        setNotifications([]);
+      }
+    } else {
+      // Coaches, admin pull all attendance
+      unsubs.push(fdb.listen('attendance',[],setAttendance));
+      unsubs.push(fdb.listen('notifications',[orderBy('createdAt','desc')],setNotifications));
+    }
+
+    // Only coaches and admin see pending photos, injuries, broadcasts, reminders, all users
+    if(!isFanAlum) {
+      unsubs.push(fdb.listen('users',[where('approved','==',true)],setUsers));
+    }
+    if(user.role==='admin'||user.role==='coach') {
+      unsubs.push(fdb.listen('photos',[where('approved','==',false)],setPendingPhotos));
+      unsubs.push(fdb.listen('injuries',[orderBy('createdAt','desc')],setInjuries));
+      unsubs.push(fdb.listen('broadcasts',[orderBy('createdAt','desc')],setBroadcasts));
+      unsubs.push(fdb.listen('reminders',[orderBy('createdAt','desc')],setReminders));
+      unsubs.push(fdb.listen('users',[where('approved','==',false)],setPendingUsers));
+    }
+
     if(activeThread) {
       unsubs.push(fdb.listen(`threads/${activeThread}/messages`,[orderBy('createdAt','asc')],setMessages));
     }
@@ -526,7 +640,7 @@ function AppContent({user, tab, setTab, notify, fdb, db, storage, storageRef, up
       await fdb.add('attendance',{athleteId,athleteName,sport:attSport,date:attDate,status,markedBy:user.id,markedByName:user.name});
     }
     if(status==='absent'||status==='tardy') {
-      const parent = users.find(u=>u.role==='parent'&&u.childName===athleteName);
+      const parent = users.find(u=>u.role==='parent'&&(u.childId===athleteId||u.childName===athleteName));
       if(parent) {
         const already = notifications.find(n=>n.athleteName===athleteName&&n.date===attDate&&n.type===status);
         if(!already) {
@@ -586,7 +700,7 @@ function AppContent({user, tab, setTab, notify, fdb, db, storage, storageRef, up
   const athletes = users.filter(u=>u.role==='athlete');
   const myTeamAthletes = athletes.filter(u=>u.sport===user.sport);
   const myAttendance = attendance.filter(a=>a.athleteId===user.id);
-  const myNotifications = notifications.filter(n=>n.parentId===user.id||n.parentName===user.name);
+  const myNotifications = user.role==='parent' ? notifications.filter(n=>n.parentId===user.id||(user.childId&&n.athleteId===user.childId)||(user.childName&&n.athleteName===user.childName)) : notifications.filter(n=>n.parentId===user.id||n.parentName===user.name);
   const liveGames = schedules.filter(g=>g.liveScore?.live);
 
   // ── RENDER ──
@@ -798,8 +912,33 @@ function AppContent({user, tab, setTab, notify, fdb, db, storage, storageRef, up
   // ─────────────────────────────────────────────────────────────────────────
   function AttendanceTab() {
     const canEdit = user.role==='admin'||user.role==='coach';
+    const isParent = user.role==='parent';
     const sportList = user.role==='coach'&&user.sport?[user.sport]:SPORTS.map(s=>s.key);
     const teamAthletes = athletes.filter(u=>u.sport===attSport);
+
+    // Parents only see their own child's records
+    const childId = user.childId||null;
+    const childName = user.childName||'';
+    const myChildAtt = attendance.filter(a=>a.athleteId===childId||a.athleteName===childName);
+
+    // Admin/coach see all; parent sees only their child
+    const logToShow = isParent ? myChildAtt : attendance;
+
+    if(isParent) return <div>
+      <div style={s.pageHeader}><span style={s.pageTitle}>Attendance</span><span style={s.pageSub}>{childName}</span></div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:16}}>
+        {[{n:myChildAtt.filter(a=>a.status==='present').length,l:'Present',c:G.green},{n:myChildAtt.filter(a=>a.status==='absent').length,l:'Absences',c:G.red},{n:myChildAtt.filter(a=>a.status==='tardy').length,l:'Tardies',c:G.gold}].map(({n,l,c})=><div key={l} style={s.statBlock}><div style={{...s.statNum,color:c}}>{n}</div><div style={s.statLbl}>{l}</div></div>)}
+      </div>
+      <Card>
+        <CardTitle>{childName}'s Attendance Record</CardTitle>
+        {myChildAtt.length?myChildAtt.map(a=><div key={a.id} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:`0.5px solid ${G.off}`,fontSize:13}}>
+          <div style={{flex:1,fontWeight:500}}>{a.sport}</div>
+          <div style={{fontSize:12,color:G.muted}}>{a.date}</div>
+          <span style={{fontSize:11,padding:'2px 8px',borderRadius:4,background:a.status==='present'?G.greenBg:a.status==='absent'?G.redBg:'#fef9c3',color:a.status==='present'?G.green:a.status==='absent'?G.red:'#854d0e'}}>{a.status}</span>
+        </div>):<Empty msg="No attendance records yet."/>}
+      </Card>
+    </div>;
+
     return <div>
       <div style={s.pageHeader}><span style={s.pageTitle}>Attendance</span></div>
       <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:16}}>
@@ -828,7 +967,7 @@ function AppContent({user, tab, setTab, notify, fdb, db, storage, storageRef, up
           </div>}
       </Card>}
       <Card><CardTitle>Recent Log</CardTitle>
-        {attendance.slice(0,8).map(a=><div key={a.id} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:`0.5px solid ${G.off}`,fontSize:13}}>
+        {logToShow.slice(0,8).map(a=><div key={a.id} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:`0.5px solid ${G.off}`,fontSize:13}}>
           <div style={{flex:1,fontWeight:500}}>{a.athleteName}</div>
           <div style={{fontSize:12,color:G.muted}}>{a.sport}</div>
           <div style={{fontSize:12,color:G.muted}}>{a.date}</div>
