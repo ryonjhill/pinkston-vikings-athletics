@@ -661,6 +661,7 @@ function AppContent({user, tab, setTab, notify, fdb, db, storage, storageRef, up
 
   const approveUser = async (uid) => { await updateDoc(doc(db,'users',uid),{approved:true}); notify('User approved!'); };
   const rejectUser = async (uid) => { await fdb.delete('users',uid); notify('User declined.'); };
+  const deleteUser = async (uid, name) => { await fdb.delete('users', uid); notify(`${name}'s account has been deleted.`); };
   const approvePhoto = async (photoId) => { await updateDoc(doc(db,'photos',photoId),{approved:true}); notify('Photo approved!'); };
   const rejectPhoto = async (photoId) => { await fdb.delete('photos',photoId); notify('Photo declined.'); };
 
@@ -894,16 +895,36 @@ function AppContent({user, tab, setTab, notify, fdb, db, storage, storageRef, up
   // ROSTER
   // ─────────────────────────────────────────────────────────────────────────
   function RosterTab() {
+    const [confirmDelete, setConfirmDelete] = useState(null); // {id, name}
     const filtered = athletes.filter(a=>rosterFilter==='All'||a.sport===rosterFilter);
+    const isAdmin = user.role==='admin';
     return <div>
       <div style={s.pageHeader}><div><span style={s.pageTitle}>Roster</span><span style={s.pageSub}>{athletes.length} athletes</span></div></div>
       <FilterBar cats={['All',...SPORTS.map(s=>s.key)]} active={rosterFilter} onChange={setRosterFilter}/>
       <Card>
         {filtered.length?<table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
-          <thead><tr>{['#','Name','Sport','Grade'].map(h=><th key={h} style={{fontFamily:"'Oswald',sans-serif",fontSize:11,fontWeight:500,letterSpacing:'1px',textTransform:'uppercase',color:G.muted,textAlign:'left',padding:'8px 10px',borderBottom:`1px solid ${G.off}`}}>{h}</th>)}</tr></thead>
-          <tbody>{filtered.map(a=><tr key={a.id}><td style={{padding:'10px'}}><span style={{display:'inline-block',background:G.black,color:G.gold,fontFamily:"'Oswald',sans-serif",fontSize:12,fontWeight:700,width:28,height:28,borderRadius:'50%',textAlign:'center',lineHeight:'28px'}}>{a.jersey||'—'}</span></td><td style={{padding:'10px',fontWeight:500}}>{a.name}</td><td style={{padding:'10px',fontSize:12,color:G.muted}}>{a.sport||'—'}</td><td style={{padding:'10px'}}>{a.grade||'—'}</td></tr>)}</tbody>
+          <thead><tr>{['#','Name','Sport','Grade',isAdmin?'Action':''].map(h=><th key={h} style={{fontFamily:"'Oswald',sans-serif",fontSize:11,fontWeight:500,letterSpacing:'1px',textTransform:'uppercase',color:G.muted,textAlign:'left',padding:'8px 10px',borderBottom:`1px solid ${G.off}`}}>{h}</th>)}</tr></thead>
+          <tbody>{filtered.map(a=><tr key={a.id}>
+            <td style={{padding:'10px'}}><span style={{display:'inline-block',background:G.black,color:G.gold,fontFamily:"'Oswald',sans-serif",fontSize:12,fontWeight:700,width:28,height:28,borderRadius:'50%',textAlign:'center',lineHeight:'28px'}}>{a.jersey||'—'}</span></td>
+            <td style={{padding:'10px',fontWeight:500}}>{a.name}</td>
+            <td style={{padding:'10px',fontSize:12,color:G.muted}}>{a.sport||'—'}</td>
+            <td style={{padding:'10px'}}>{a.grade||'—'}</td>
+            {isAdmin&&<td style={{padding:'10px'}}><Btn variant="danger" sm onClick={()=>setConfirmDelete({id:a.id,name:a.name})}>Delete</Btn></td>}
+          </tr>)}</tbody>
         </table>:<Empty msg="No athletes found."/>}
       </Card>
+      {confirmDelete&&<Modal title="Delete Account" onClose={()=>setConfirmDelete(null)}>
+        <div style={{fontSize:14,color:G.black,lineHeight:1.6,marginBottom:16}}>
+          Are you sure you want to delete <strong>{confirmDelete.name}</strong>'s account?
+          <div style={{marginTop:8,fontSize:13,color:G.red,background:G.redBg,padding:'10px 12px',borderRadius:6,lineHeight:1.6}}>
+            ⚠️ This will permanently remove their profile from the app. This cannot be undone. Their attendance records and other data will remain for historical purposes.
+          </div>
+        </div>
+        <div style={{display:'flex',gap:8}}>
+          <Btn variant="danger" onClick={()=>{deleteUser(confirmDelete.id,confirmDelete.name);setConfirmDelete(null);}}>Yes, Delete Account</Btn>
+          <Btn variant="outline" onClick={()=>setConfirmDelete(null)}>Cancel</Btn>
+        </div>
+      </Modal>}
     </div>;
   }
 
@@ -1313,8 +1334,60 @@ function AppContent({user, tab, setTab, notify, fdb, db, storage, storageRef, up
   // APPROVALS
   // ─────────────────────────────────────────────────────────────────────────
   function ApprovalsTab() {
+    const [confirmDelete, setConfirmDelete] = useState(null);
+    const [linkModal, setLinkModal] = useState(false);
+    const [linkParentId, setLinkParentId] = useState('');
+    const [linkAthleteId, setLinkAthleteId] = useState('');
+    const [linkLoading, setLinkLoading] = useState(false);
+
+    const parents = users.filter(u=>u.role==='parent');
+    const athleteList = users.filter(u=>u.role==='athlete');
+
+    const saveLink = async () => {
+      if(!linkParentId||!linkAthleteId){notify('Please select both a parent and an athlete.');return;}
+      setLinkLoading(true);
+      const athlete = athleteList.find(u=>u.id===linkAthleteId);
+      if(!athlete){notify('Athlete not found.');setLinkLoading(false);return;}
+      await updateDoc(doc(db,'users',linkParentId),{
+        childId: linkAthleteId,
+        childName: athlete.name,
+      });
+      setLinkModal(false);setLinkParentId('');setLinkAthleteId('');setLinkLoading(false);
+      notify(`✅ Parent linked to ${athlete.name} successfully!`);
+    };
+
+    const currentLink = (parentId) => {
+      const p = users.find(u=>u.id===parentId);
+      return p?.childName ? `Currently linked to: ${p.childName}` : 'Not linked';
+    };
+
     return <div>
       <div style={s.pageHeader}><span style={s.pageTitle}>Approvals</span><span style={s.pageSub}>{pendingUsers.length+pendingPhotos.length} pending</span></div>
+
+      {/* PARENT-ATHLETE LINK */}
+      <Card style={{border:`0.5px solid rgba(30,64,175,0.3)`,background:G.blueBg}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+          <div>
+            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:13,fontWeight:600,letterSpacing:'1px',textTransform:'uppercase',color:G.blue}}>🔗 Link Parent to Athlete</div>
+            <div style={{fontSize:12,color:G.blue,marginTop:4,opacity:0.8}}>Connect a parent account to their child so attendance notifications work correctly.</div>
+          </div>
+          <Btn variant="primary" sm onClick={()=>setLinkModal(true)}>Link Now</Btn>
+        </div>
+        {/* Show current links */}
+        {parents.length>0&&<div style={{marginTop:10,borderTop:`0.5px solid rgba(30,64,175,0.2)`,paddingTop:10}}>
+          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:11,letterSpacing:'1px',textTransform:'uppercase',color:G.blue,marginBottom:8}}>Current Parent Links</div>
+          {parents.map(p=><div key={p.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'7px 0',borderBottom:`0.5px solid rgba(30,64,175,0.15)`,fontSize:13}}>
+            <div>
+              <span style={{fontWeight:600,color:G.black}}>{p.name}</span>
+              <span style={{fontSize:12,color:G.blue,marginLeft:8}}>{p.childName?`→ ${p.childName}`:'⚠️ Not linked'}</span>
+            </div>
+            <Btn variant="outline" sm onClick={()=>{setLinkParentId(p.id);setLinkAthleteId('');setLinkModal(true);}}>
+              {p.childName?'Re-link':'Link'}
+            </Btn>
+          </div>)}
+        </div>}
+      </Card>
+
       {pendingPhotos.length>0&&<Card>
         <CardTitle>Photos ({pendingPhotos.length})</CardTitle>
         {pendingPhotos.map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',borderBottom:`0.5px solid ${G.off}`}}>
@@ -1323,13 +1396,65 @@ function AppContent({user, tab, setTab, notify, fdb, db, storage, storageRef, up
           <div style={{display:'flex',gap:6}}><Btn variant="gold" sm onClick={()=>approvePhoto(p.id)}>Approve</Btn><Btn variant="danger" sm onClick={()=>rejectPhoto(p.id)}>Decline</Btn></div>
         </div>)}
       </Card>}
+
       <Card>
-        <CardTitle>Users ({pendingUsers.length})</CardTitle>
+        <CardTitle>Pending Users ({pendingUsers.length})</CardTitle>
         {pendingUsers.length?pendingUsers.map(u=><div key={u.id} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',borderBottom:`0.5px solid ${G.off}`}}>
           <div style={{flex:1}}><div style={{fontWeight:600,fontSize:14}}>{u.name} <Badge role={u.role}>{u.role}</Badge></div><div style={{fontSize:12,color:G.muted}}>{u.email}{u.sport?' · '+u.sport:''}{u.childName?' · Parent of '+u.childName:''}</div></div>
           <div style={{display:'flex',gap:6}}><Btn variant="gold" sm onClick={()=>approveUser(u.id)}>Approve</Btn><Btn variant="danger" sm onClick={()=>rejectUser(u.id)}>Decline</Btn></div>
         </div>):<Empty msg="No pending users."/>}
       </Card>
+
+      <Card>
+        <CardTitle>User Management — All Accounts ({users.length})</CardTitle>
+        <div style={{fontSize:12,color:G.muted,marginBottom:12,lineHeight:1.5}}>Delete an account to permanently remove a user's access. Historical data will be preserved.</div>
+        {users.filter(u=>u.id!==user.id).map(u=><div key={u.id} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',borderBottom:`0.5px solid ${G.off}`}}>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:600,fontSize:14,color:G.black}}>{u.name} <Badge role={u.role}>{u.role}</Badge></div>
+            <div style={{fontSize:12,color:G.muted}}>{u.email}{u.sport?' · '+u.sport:''}{u.childName?` · Parent of ${u.childName}`:''}</div>
+          </div>
+          <Btn variant="danger" sm onClick={()=>setConfirmDelete({id:u.id,name:u.name})}>Delete</Btn>
+        </div>)}
+      </Card>
+
+      {/* LINK MODAL */}
+      {linkModal&&<Modal title="Link Parent to Athlete" onClose={()=>{setLinkModal(false);setLinkParentId('');setLinkAthleteId('');}}>
+        <div style={{fontSize:13,color:'#555',lineHeight:1.6,marginBottom:16}}>Select a parent and their child's athlete account. Once linked, the parent will automatically receive attendance notifications for their child.</div>
+        <div style={{marginBottom:12}}>
+          <label style={s.label}>Parent Account</label>
+          <select style={s.input} value={linkParentId} onChange={e=>setLinkParentId(e.target.value)}>
+            <option value="">Select parent...</option>
+            {parents.map(p=><option key={p.id} value={p.id}>{p.name} — {p.childName?`linked to ${p.childName}`:'not linked'}</option>)}
+          </select>
+        </div>
+        <div style={{marginBottom:16}}>
+          <label style={s.label}>Their Child (Athlete Account)</label>
+          <select style={s.input} value={linkAthleteId} onChange={e=>setLinkAthleteId(e.target.value)}>
+            <option value="">Select athlete...</option>
+            {athleteList.map(a=><option key={a.id} value={a.id}>{a.name} — {a.sport||'No sport yet'} · Grade {a.grade||'—'}</option>)}
+          </select>
+        </div>
+        {linkParentId&&linkAthleteId&&<div style={{fontSize:13,color:G.green,background:G.greenBg,padding:'10px 12px',borderRadius:6,marginBottom:14,lineHeight:1.5}}>
+          ✅ Will link <strong>{users.find(u=>u.id===linkParentId)?.name}</strong> → <strong>{athleteList.find(u=>u.id===linkAthleteId)?.name}</strong>
+        </div>}
+        <div style={{display:'flex',gap:8}}>
+          <Btn variant="primary" onClick={saveLink} disabled={linkLoading}>{linkLoading?'Saving...':'Save Link'}</Btn>
+          <Btn variant="outline" onClick={()=>{setLinkModal(false);setLinkParentId('');setLinkAthleteId('');}}>Cancel</Btn>
+        </div>
+      </Modal>}
+
+      {confirmDelete&&<Modal title="Delete Account" onClose={()=>setConfirmDelete(null)}>
+        <div style={{fontSize:14,color:G.black,lineHeight:1.6,marginBottom:16}}>
+          Are you sure you want to delete <strong>{confirmDelete.name}</strong>'s account?
+          <div style={{marginTop:10,fontSize:13,color:G.red,background:G.redBg,padding:'10px 12px',borderRadius:6,lineHeight:1.6}}>
+            ⚠️ This permanently removes their access. Attendance records and historical data will be preserved. This cannot be undone.
+          </div>
+        </div>
+        <div style={{display:'flex',gap:8}}>
+          <Btn variant="danger" onClick={()=>{deleteUser(confirmDelete.id,confirmDelete.name);setConfirmDelete(null);}}>Yes, Delete Account</Btn>
+          <Btn variant="outline" onClick={()=>setConfirmDelete(null)}>Cancel</Btn>
+        </div>
+      </Modal>}
     </div>;
   }
 
