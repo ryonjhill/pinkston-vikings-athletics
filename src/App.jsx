@@ -1,6 +1,96 @@
 import React from "react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { initializeApp } from "firebase/app";
+
+// ─── GOOGLE PLACES AUTOCOMPLETE ───────────────────────────────────────────────
+const GOOGLE_PLACES_KEY = "AIzaSyB--lmmPax6pMWaLxeF9QZG9ICw8iVJ7fo";
+
+let googlePlacesLoading = false;
+let googlePlacesLoaded = false;
+const googlePlacesCallbacks = [];
+
+function loadGooglePlaces(cb) {
+  if(googlePlacesLoaded && window.google?.maps?.places) { cb(); return; }
+  googlePlacesCallbacks.push(cb);
+  if(googlePlacesLoading) return;
+  googlePlacesLoading = true;
+  const script = document.createElement('script');
+  script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_PLACES_KEY}&libraries=places&callback=__googlePlacesReady`;
+  script.async = true;
+  script.defer = true;
+  window.__googlePlacesReady = () => {
+    googlePlacesLoaded = true;
+    googlePlacesLoading = false;
+    googlePlacesCallbacks.forEach(fn => fn());
+    googlePlacesCallbacks.length = 0;
+  };
+  script.onerror = () => {
+    googlePlacesLoading = false;
+    // silently fail — fall back to plain text input
+  };
+  document.head.appendChild(script);
+}
+
+function LocationInput({value, onChange, placeholder='e.g. Main Gym, Vikings Field...'}) {
+  const inputRef = useRef(null);
+  const autocompleteRef = useRef(null);
+  const [ready, setReady] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      loadGooglePlaces(() => setReady(true));
+    }, 100);
+    // If not ready in 5 seconds, fall back to plain input
+    const fallback = setTimeout(() => {
+      if(!googlePlacesLoaded) setFailed(true);
+    }, 5000);
+    return () => { clearTimeout(timer); clearTimeout(fallback); };
+  }, []);
+
+  useEffect(() => {
+    if(!ready || !inputRef.current || autocompleteRef.current) return;
+    try {
+      autocompleteRef.current = new window.google.maps.places.Autocomplete(inputRef.current, {
+        componentRestrictions: { country: 'us' },
+        fields: ['formatted_address', 'name'],
+      });
+      autocompleteRef.current.addListener('place_changed', () => {
+        const place = autocompleteRef.current.getPlace();
+        const loc = place.name && place.formatted_address
+          ? `${place.name}, ${place.formatted_address}`
+          : place.formatted_address || place.name || '';
+        onChange(loc);
+        if(inputRef.current) inputRef.current.value = loc;
+      });
+    } catch(e) {
+      setFailed(true);
+    }
+  }, [ready]);
+
+  // If Places API failed, show plain text input
+  if(failed) {
+    return <input
+      style={{width:'100%',padding:'9px 12px',border:'0.5px solid rgba(0,0,0,0.18)',borderRadius:7,fontFamily:"'Source Sans 3',sans-serif",fontSize:14,color:'#0d0d0d',background:'#fff',outline:'none'}}
+      placeholder={placeholder}
+      value={value}
+      onChange={e => onChange(e.target.value)}
+    />;
+  }
+
+  return (
+    <div style={{position:'relative'}}>
+      <input
+        ref={inputRef}
+        style={{width:'100%',padding:'9px 12px',border:'0.5px solid rgba(0,0,0,0.18)',borderRadius:7,fontFamily:"'Source Sans 3',sans-serif",fontSize:14,color:'#0d0d0d',background:'#fff',outline:'none'}}
+        placeholder={ready ? placeholder : '📍 Loading location search...'}
+        defaultValue={value}
+        onChange={e => onChange(e.target.value)}
+      />
+    </div>
+  );
+}
+
 import {
   getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
   onAuthStateChanged, signOut, sendPasswordResetEmail
@@ -105,6 +195,21 @@ function GameBadge({b}){
   return <span style={{fontFamily:"'Oswald',sans-serif",fontSize:11,fontWeight:500,letterSpacing:'0.8px',padding:'3px 8px',borderRadius:4,whiteSpace:'nowrap',...(m[b]||m.away)}}>{l[b]||b}</span>;
 }
 
+// ── MAPS LINK HELPER ─────────────────────────────────────────────────────────
+function LocationLink({text,style={}}){
+  if(!text) return null;
+  // Extract just the location part (after the last ·)
+  const parts = text.split('·');
+  const location = parts[parts.length-1].trim();
+  const time = parts.slice(0,-1).join('·').trim();
+  const mapsUrl = `https://maps.google.com/?q=${encodeURIComponent(location)}`;
+  return <span>
+    {time&&<span>{time} · </span>}
+    <a href={mapsUrl} target="_blank" rel="noopener noreferrer" style={{color:'#1e40af',textDecoration:'underline',fontSize:'inherit',...style}}
+      onClick={e=>e.stopPropagation()}>📍 {location}</a>
+  </span>;
+}
+
 function GameItem({g,showLive=false}){
   return <div style={{display:'flex',alignItems:'center',gap:12,padding:'12px 0',borderBottom:`0.5px solid ${G.off}`}}>
     <div style={{width:42,textAlign:'center',flexShrink:0}}>
@@ -113,7 +218,7 @@ function GameItem({g,showLive=false}){
     </div>
     <div style={{flex:1,minWidth:0}}>
       <div style={{fontWeight:600,fontSize:14,color:G.black}}>{g.opponent}</div>
-      <div style={{fontSize:12,color:G.muted,marginTop:2}}>{g.sport?`${g.sport} · `:''}{ g.details}</div>
+      <div style={{fontSize:12,color:G.muted,marginTop:2}}>{g.sport?`${g.sport} · `:''}<LocationLink text={g.details}/></div>
       {showLive&&g.liveScore?.live&&<div style={{display:'flex',alignItems:'center',gap:6,marginTop:4}}>
         <span style={{background:G.red,color:'#fff',fontSize:9,fontFamily:"'Oswald',sans-serif",fontWeight:700,padding:'1px 6px',borderRadius:4,letterSpacing:'1px'}}>● LIVE</span>
         <span style={{fontFamily:"'Oswald',sans-serif",fontSize:14,fontWeight:700,color:G.black}}>Vikings {g.liveScore.us} – {g.liveScore.them}</span>
@@ -338,12 +443,12 @@ export default function App() {
 
   // ── NAV TABS ──
   const navTabs = {
-    admin:[{id:'dashboard',label:'Dashboard'},{id:'photos',label:'Photos'},{id:'schedule',label:'Schedule'},{id:'roster',label:'Roster'},{id:'attendance',label:'Attendance'},{id:'health',label:'Health Log'},{id:'broadcast',label:'Broadcast'},{id:'reminders',label:'Reminders'},{id:'stats',label:'Stats'},{id:'messages',label:'Messages'},{id:'approvals',label:'Approvals'}],
-    coach:[{id:'dashboard',label:'Dashboard'},{id:'photos',label:'Photos'},{id:'my-team',label:'My Team'},{id:'schedule',label:'Schedule'},{id:'announcements',label:'Announce'},{id:'attendance',label:'Attendance'},{id:'health',label:'Health Log'},{id:'broadcast',label:'Broadcast'},{id:'reminders',label:'Reminders'},{id:'messages',label:'Messages'}],
-    athlete:[{id:'dashboard',label:'Dashboard'},{id:'photos',label:'Photos'},{id:'my-sports',label:'My Sports'},{id:'schedule',label:'Schedule'},{id:'stats',label:'Stats'}],
-    parent:[{id:'dashboard',label:'Dashboard'},{id:'photos',label:'Photos'},{id:'schedule',label:'Schedule'},{id:'attendance',label:'Attendance'},{id:'messages',label:'Messages'},{id:'notifications',label:'Notifications'}],
-    fan:[{id:'dashboard',label:'Dashboard'},{id:'community',label:'Fan Zone'},{id:'photos',label:'Photos'},{id:'schedule',label:'Schedule'},{id:'stats',label:'Stats'}],
-    alumni:[{id:'dashboard',label:'Dashboard'},{id:'community',label:'Fan Zone'},{id:'photos',label:'Photos'},{id:'schedule',label:'Schedule'},{id:'stats',label:'Stats'}],
+    admin:[{id:'dashboard',label:'Dashboard'},{id:'photos',label:'Photos'},{id:'schedule',label:'Schedule'},{id:'calendar',label:'Calendar'},{id:'roster',label:'Roster'},{id:'attendance',label:'Attendance'},{id:'health',label:'Health Log'},{id:'broadcast',label:'Broadcast'},{id:'stats',label:'Stats'},{id:'messages',label:'Messages'},{id:'approvals',label:'Approvals'}],
+    coach:[{id:'dashboard',label:'Dashboard'},{id:'photos',label:'Photos'},{id:'my-team',label:'My Team'},{id:'schedule',label:'Schedule'},{id:'calendar',label:'Calendar'},{id:'announcements',label:'Announce'},{id:'attendance',label:'Attendance'},{id:'health',label:'Health Log'},{id:'broadcast',label:'Broadcast'},{id:'messages',label:'Messages'}],
+    athlete:[{id:'dashboard',label:'Dashboard'},{id:'photos',label:'Photos'},{id:'my-sports',label:'My Sports'},{id:'schedule',label:'Schedule'},{id:'calendar',label:'Calendar'},{id:'stats',label:'Stats'}],
+    parent:[{id:'dashboard',label:'Dashboard'},{id:'photos',label:'Photos'},{id:'schedule',label:'Schedule'},{id:'calendar',label:'Calendar'},{id:'attendance',label:'Attendance'},{id:'messages',label:'Messages'},{id:'notifications',label:'Notifications'}],
+    fan:[{id:'dashboard',label:'Dashboard'},{id:'community',label:'Fan Zone'},{id:'photos',label:'Photos'},{id:'schedule',label:'Schedule'},{id:'calendar',label:'Calendar'},{id:'stats',label:'Stats'}],
+    alumni:[{id:'dashboard',label:'Dashboard'},{id:'community',label:'Fan Zone'},{id:'photos',label:'Photos'},{id:'schedule',label:'Schedule'},{id:'calendar',label:'Calendar'},{id:'stats',label:'Stats'}],
   };
   const tabs = userProfile ? (navTabs[userProfile.role]||navTabs.fan) : [];
 
@@ -563,6 +668,7 @@ function AppContent({user, tab, setTab, notify, fdb, db, storage, storageRef, up
 
   // ── FIRESTORE LIVE DATA ──
   const [schedules, setSchedules] = useState([]);
+  const [events, setEvents] = useState([]);
   const [announcements, setAnnouncements] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [notifications, setNotifications] = useState([]);
@@ -582,6 +688,7 @@ function AppContent({user, tab, setTab, notify, fdb, db, storage, storageRef, up
     const isFanAlum = user.role==='fan'||user.role==='alumni';
 
     unsubs.push(fdb.listen('schedules',[orderBy('createdAt','desc')],setSchedules));
+    unsubs.push(fdb.listen('events',[orderBy('createdAt','desc')],setEvents));
     unsubs.push(fdb.listen('announcements',[orderBy('createdAt','desc')],setAnnouncements));
     unsubs.push(fdb.listen('photos',[where('approved','==',true)],setPhotos));
 
@@ -630,6 +737,7 @@ function AppContent({user, tab, setTab, notify, fdb, db, storage, storageRef, up
 
   // ── ACTIONS ──
   const addSchedule = async (data) => { await fdb.add('schedules',{...data,createdBy:user.id,sport:user.sport||data.sport}); notify('Game added!'); };
+  const addEvent = async (data) => { await fdb.add('events',{...data,createdBy:user.id,createdByName:user.name}); notify(`${data.eventType} added to calendar!`); };
   const addAnnouncement = async (data) => { await fdb.add('announcements',{...data,coach:user.name,coachId:user.id}); notify('Announcement posted!'); };
 
   const markAttendance = async (athleteId, athleteName, athleteSport, status) => {
@@ -710,6 +818,7 @@ function AppContent({user, tab, setTab, notify, fdb, db, storage, storageRef, up
       case 'dashboard': return <DashboardTab/>;
       case 'photos': return <PhotoTab/>;
       case 'schedule': return <ScheduleTab/>;
+      case 'calendar': return <CalendarTab/>;
       case 'my-sports': return <MySportsTab/>;
       case 'my-team': return <MyTeamTab/>;
       case 'announcements': return <AnnouncementsTab/>;
@@ -807,11 +916,11 @@ function AppContent({user, tab, setTab, notify, fdb, db, storage, storageRef, up
       <Card>{items.length?items.map(g=><GameItem key={g.id} g={g} showLive/>):<Empty msg="No games scheduled yet."/>}</Card>
       {modal&&<Modal title="Add Game" onClose={()=>setModal(false)}>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
-          <div><label style={s.label}>Month</label><input style={s.input} placeholder="Apr" value={gf.month} onChange={e=>setGf(x=>({...x,month:e.target.value}))}/></div>
-          <div><label style={s.label}>Day</label><input style={s.input} placeholder="15" value={gf.day} onChange={e=>setGf(x=>({...x,day:e.target.value}))}/></div>
+          <div><label style={s.label}>Month</label><select style={s.input} value={gf.month} onChange={e=>setGf(x=>({...x,month:e.target.value}))}><option value="">Month...</option>{['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map(m=><option key={m} value={m}>{m}</option>)}</select></div>
+          <div><label style={s.label}>Day</label><select style={s.input} value={gf.day} onChange={e=>setGf(x=>({...x,day:e.target.value}))}><option value="">Day...</option>{Array.from({length:31},(_,i)=>i+1).map(d=><option key={d} value={d}>{d}</option>)}</select></div>
         </div>
         <div style={{marginBottom:12}}><label style={s.label}>Opponent</label><input style={s.input} placeholder="vs. Lincoln HS" value={gf.opponent} onChange={e=>setGf(x=>({...x,opponent:e.target.value}))}/></div>
-        <div style={{marginBottom:12}}><label style={s.label}>Details</label><input style={s.input} placeholder="7:00 PM · Main Gym" value={gf.details} onChange={e=>setGf(x=>({...x,details:e.target.value}))}/></div>
+        <div style={{marginBottom:12}}><label style={s.label}>Details / Location</label><LocationInput value={gf.details} onChange={v=>setGf(x=>({...x,details:v}))} placeholder="7:00 PM · Main Gym..."/></div>
         <div style={{marginBottom:16}}><label style={s.label}>Type</label><select style={s.input} value={gf.badge} onChange={e=>setGf(x=>({...x,badge:e.target.value}))}><option value="home">Home</option><option value="away">Away</option></select></div>
         <div style={{display:'flex',gap:8}}><Btn variant="primary" onClick={save}>Add</Btn><Btn variant="outline" onClick={()=>setModal(false)}>Cancel</Btn></div>
       </Modal>}
@@ -1454,6 +1563,219 @@ function AppContent({user, tab, setTab, notify, fdb, db, storage, storageRef, up
           <Btn variant="danger" onClick={()=>{deleteUser(confirmDelete.id,confirmDelete.name);setConfirmDelete(null);}}>Yes, Delete Account</Btn>
           <Btn variant="outline" onClick={()=>setConfirmDelete(null)}>Cancel</Btn>
         </div>
+      </Modal>}
+    </div>;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // CALENDAR
+  // ─────────────────────────────────────────────────────────────────────────
+  function CalendarTab() {
+    const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const MONTH_MAP = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
+    const TYPE_COLORS = {Game:'#0d0d0d',Practice:'#1a5a2a',Event:'#92640a'};
+    const TYPE_BG = {Game:G.black,Practice:'#1a5a2a',Event:G.gold};
+    const TYPE_ICONS = {Game:'🏟️',Practice:'🏃',Event:'📅'};
+
+    const now = new Date();
+    const [viewMonth, setViewMonth] = useState(now.getMonth());
+    const [viewYear, setViewYear] = useState(now.getFullYear());
+    const [selectedItem, setSelectedItem] = useState(null);
+    const [typeFilter, setTypeFilter] = useState('All');
+    const [sportFilter, setSportFilter] = useState('All');
+    const [addModal, setAddModal] = useState(false);
+    const [af, setAf] = useState({eventType:'Practice',sport:'',title:'',details:'',month:'',day:'',time:'',audience:'all',reminder:'none'});
+
+    const canAdd = user.role==='admin'||user.role==='coach';
+
+    const REMINDER_OPTS = [
+      {val:'none',label:'No reminder'},
+      {val:'2hrs',label:'2 hours before'},
+      {val:'1day',label:'1 day before'},
+      {val:'2days',label:'2 days before'},
+      {val:'1week',label:'1 week before'},
+    ];
+
+    // Combine schedules (games) and events (practices/other) into one list
+    const allItems = [
+      ...schedules.map(g=>({...g, eventType:'Game', title:g.opponent, itemId:`g_${g.id}`})),
+      ...events.map(e=>({...e, itemId:`e_${e.id}`})),
+    ];
+
+    // Parse dates
+    const parsedItems = allItems.map(item=>{
+      const monthNum = MONTH_MAP[item.month];
+      const day = parseInt(item.day);
+      if(monthNum===undefined||isNaN(day)) return null;
+      return {...item, dateObj:new Date(viewYear, monthNum, day)};
+    }).filter(Boolean);
+
+    const filtered = parsedItems.filter(item=>{
+      if(typeFilter!=='All'&&item.eventType!==typeFilter) return false;
+      if(sportFilter!=='All'&&item.sport!==sportFilter) return false;
+      return true;
+    });
+
+    const itemsForDay = (day) => filtered.filter(item=>
+      item.dateObj.getFullYear()===viewYear &&
+      item.dateObj.getMonth()===viewMonth &&
+      item.dateObj.getDate()===day
+    );
+
+    // Build calendar grid
+    const firstDay = new Date(viewYear, viewMonth, 1).getDay();
+    const daysInMonth = new Date(viewYear, viewMonth+1, 0).getDate();
+    const cells = [];
+    for(let i=0;i<firstDay;i++) cells.push(null);
+    for(let d=1;d<=daysInMonth;d++) cells.push(d);
+    while(cells.length%7!==0) cells.push(null);
+
+    const isToday = (day) => {
+      const t = new Date();
+      return day&&t.getFullYear()===viewYear&&t.getMonth()===viewMonth&&t.getDate()===day;
+    };
+
+    const saveEvent = async () => {
+      if(!af.sport||!af.title||!af.month||!af.day){notify('Please fill in all required fields.');return;}
+      await addEvent({...af});
+      if(af.reminder!=='none') {
+        const reminderLabels = {'2hrs':'2 hours','1day':'1 day','2days':'2 days','1week':'1 week'};
+        const reminderMsg = `Reminder: ${af.sport} ${af.eventType.toLowerCase()} — ${af.title} on ${af.month} ${af.day}${af.time?` at ${af.time}`:''}${af.details?`. ${af.details}`:''}. lgpathletics.net`;
+        await scheduleReminder({type:af.eventType.toLowerCase(),sport:af.sport,message:reminderMsg,date:`${af.month} ${af.day}`,reminderTiming:af.reminder,reminderLabel:reminderLabels[af.reminder]||af.reminder,sent:false});
+      }
+      setAf({eventType:'Practice',sport:'',title:'',details:'',month:'',day:'',time:'',audience:'all',reminder:'none'});
+      setAddModal(false);
+    };
+
+    const monthItems = filtered.filter(item=>item.dateObj.getMonth()===viewMonth&&item.dateObj.getFullYear()===viewYear).sort((a,b)=>a.dateObj-b.dateObj);
+
+    return <div>
+      <div style={s.pageHeader}>
+        <div><span style={s.pageTitle}>Calendar</span></div>
+        {canAdd&&<Btn variant="gold" sm onClick={()=>setAddModal(true)}>+ Add Event</Btn>}
+      </div>
+
+      {/* Type + Sport filters */}
+      <div style={{display:'flex',gap:8,marginBottom:10,flexWrap:'wrap'}}>
+        {['All','Game','Practice','Event'].map(t=><button key={t} style={{...s.pill(typeFilter===t),background:typeFilter===t?(TYPE_BG[t]||G.black):G.white,color:typeFilter===t?'#fff':G.muted,border:`0.5px solid ${typeFilter===t?(TYPE_BG[t]||G.black):'rgba(0,0,0,0.12)'}`}} onClick={()=>setTypeFilter(t)}>{TYPE_ICONS[t]||''} {t}</button>)}
+      </div>
+      <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap'}}>
+        {['All',...SPORTS.map(s=>s.key)].map(sp=><button key={sp} style={s.pill(sportFilter===sp)} onClick={()=>setSportFilter(sp)}>{sp}</button>)}
+      </div>
+
+      {/* Month navigation */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
+        <button onClick={()=>{if(viewMonth===0){setViewMonth(11);setViewYear(y=>y-1);}else setViewMonth(m=>m-1);}} style={{...s.btn('outline'),padding:'8px 14px',fontSize:18}}>‹</button>
+        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:600,color:G.black,letterSpacing:'0.5px'}}>{MONTHS[viewMonth]} {viewYear}</div>
+        <button onClick={()=>{if(viewMonth===11){setViewMonth(0);setViewYear(y=>y+1);}else setViewMonth(m=>m+1);}} style={{...s.btn('outline'),padding:'8px 14px',fontSize:18}}>›</button>
+      </div>
+
+      {/* Calendar grid */}
+      <Card style={{padding:'12px'}}>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',marginBottom:4}}>
+          {DAYS.map(d=><div key={d} style={{textAlign:'center',fontFamily:"'Oswald',sans-serif",fontSize:11,fontWeight:500,letterSpacing:'1px',textTransform:'uppercase',color:G.muted,padding:'4px 0'}}>{d}</div>)}
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:2}}>
+          {cells.map((day,i)=>{
+            const items = day?itemsForDay(day):[];
+            const today = isToday(day);
+            return <div key={i} onClick={()=>{if(items.length===1)setSelectedItem(items[0]);else if(items.length>1)setSelectedItem(items[0]);}} style={{minHeight:68,borderRadius:7,padding:'4px',background:today?G.goldPale:day?G.white:'transparent',border:today?`1.5px solid ${G.gold}`:day?`0.5px solid rgba(0,0,0,0.06)`:'none',cursor:items.length>0?'pointer':'default'}}>
+              {day&&<div style={{fontFamily:"'Oswald',sans-serif",fontSize:13,fontWeight:today?700:400,color:today?G.gold:G.black,marginBottom:2}}>{day}</div>}
+              {items.slice(0,2).map((item,gi)=><div key={gi} style={{fontSize:9,fontFamily:"'Oswald',sans-serif",letterSpacing:'0.3px',background:TYPE_BG[item.eventType]||G.black,color:'#fff',borderRadius:3,padding:'1px 4px',marginBottom:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{TYPE_ICONS[item.eventType]} {item.sport?.split(' ').pop()||item.sport}</div>)}
+              {items.length>2&&<div style={{fontSize:9,color:G.muted,fontFamily:"'Oswald',sans-serif"}}>+{items.length-2} more</div>}
+            </div>;
+          })}
+        </div>
+      </Card>
+
+      {/* Legend */}
+      <div style={{display:'flex',gap:12,marginTop:10,marginBottom:4,flexWrap:'wrap'}}>
+        {[{type:'Game',label:'Game'},{type:'Practice',label:'Practice'},{type:'Event',label:'Other Event'}].map(({type,label})=><div key={type} style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:G.muted}}><div style={{width:10,height:10,borderRadius:2,background:TYPE_BG[type]}}/>{label}</div>)}
+      </div>
+
+      {/* This month's list */}
+      <Card style={{marginTop:12}}>
+        <CardTitle>{MONTHS[viewMonth]} Schedule</CardTitle>
+        {monthItems.length===0?<Empty msg={`Nothing scheduled in ${MONTHS[viewMonth]}.`}/>:
+          monthItems.map(item=><div key={item.itemId} onClick={()=>setSelectedItem(item)} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',borderBottom:`0.5px solid ${G.off}`,cursor:'pointer'}}>
+            <div style={{width:38,height:38,borderRadius:8,background:TYPE_BG[item.eventType]||G.black,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontSize:18}}>{TYPE_ICONS[item.eventType]}</div>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:600,fontSize:13,color:G.black}}>{item.title}</div>
+              <div style={{fontSize:12,color:G.muted}}>{item.sport} · {item.month} {item.day}{item.time?` · ${item.time}`:''}{item.details?<span> · <LocationLink text={item.details}/></span>:''}</div>
+            </div>
+            <span style={{fontFamily:"'Oswald',sans-serif",fontSize:10,padding:'2px 7px',borderRadius:4,background:item.eventType==='Game'?G.off:item.eventType==='Practice'?'#e6f4ec':'#fdf3d8',color:item.eventType==='Game'?G.black:item.eventType==='Practice'?G.green:G.gold}}>{item.eventType}</span>
+          </div>)
+        }
+      </Card>
+
+      {/* Detail popup */}
+      {selectedItem&&<Modal title={selectedItem.eventType||'Event'} onClose={()=>setSelectedItem(null)}>
+        <div style={{display:'flex',alignItems:'center',gap:14,marginBottom:16}}>
+          <div style={{width:52,height:52,borderRadius:10,background:TYPE_BG[selectedItem.eventType]||G.black,display:'flex',alignItems:'center',justifyContent:'center',fontSize:26}}>{TYPE_ICONS[selectedItem.eventType]}</div>
+          <div>
+            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:600,color:G.black}}>{selectedItem.title}</div>
+            <div style={{fontSize:13,color:G.muted,marginTop:2}}>{selectedItem.sport}</div>
+          </div>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:14}}>
+          {[
+            {label:'Date',val:`${selectedItem.month} ${selectedItem.day}`},
+            {label:'Time',val:selectedItem.time||'TBD'},
+            {label:'Location',val:selectedItem.details||'TBD'},
+            {label:'Type',val:selectedItem.eventType},
+            {label:'Sport',val:selectedItem.sport},
+            ...(selectedItem.eventType==='Game'?[{label:'Status',val:selectedItem.score?`Final: ${selectedItem.score}`:selectedItem.liveScore?.live?`LIVE: Vikings ${selectedItem.liveScore.us}–${selectedItem.liveScore.them}`:'Upcoming'},{label:'Location',val:selectedItem.badge==='home'?'Home':'Away'}]:[]),
+          ].map(({label,val})=><div key={label} style={{background:G.off,borderRadius:7,padding:'10px 12px'}}>
+            <div style={{fontSize:10,fontFamily:"'Oswald',sans-serif",letterSpacing:'1px',textTransform:'uppercase',color:G.muted,marginBottom:3}}>{label}</div>
+            <div style={{fontSize:13,fontWeight:600,color:G.black}}>
+              {label==='Location'&&val!=='TBD'&&val!=='Home'&&val!=='Away'
+                ? <a href={`https://maps.google.com/?q=${encodeURIComponent(val)}`} target="_blank" rel="noopener noreferrer" style={{color:G.blue,textDecoration:'underline'}}>📍 {val}</a>
+                : val}
+            </div>
+          </div>)}
+        </div>
+        {selectedItem.notes&&<div style={{fontSize:13,color:'#555',background:G.off,borderRadius:7,padding:'10px 12px',marginBottom:14,lineHeight:1.6}}>{selectedItem.notes}</div>}
+        {selectedItem.reminder&&selectedItem.reminder!=='none'&&<div style={{fontSize:12,color:'#7A5200',background:G.goldPale,padding:'8px 10px',borderRadius:6,marginBottom:14,lineHeight:1.5}}>⏰ Reminder set: <strong>{{'2hrs':'2 hours before','1day':'1 day before','2days':'2 days before','1week':'1 week before'}[selectedItem.reminder]||selectedItem.reminder}</strong> — Email + SMS to athletes & parents</div>}
+        {selectedItem.liveScore?.live&&<div style={{background:G.redBg,borderRadius:8,padding:'12px',textAlign:'center',marginBottom:14}}>
+          <div style={{fontSize:10,fontFamily:"'Oswald',sans-serif",letterSpacing:'1px',color:G.red,marginBottom:6}}>● LIVE · {selectedItem.liveScore.quarter}</div>
+          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:32,fontWeight:700,color:G.black}}>Vikings {selectedItem.liveScore.us} – {selectedItem.liveScore.them}</div>
+        </div>}
+        <Btn variant="outline" style={{width:'100%'}} onClick={()=>setSelectedItem(null)}>Close</Btn>
+      </Modal>}
+
+      {/* Add event modal */}
+      {addModal&&<Modal title="Add to Calendar" onClose={()=>setAddModal(false)}>
+        <div style={{marginBottom:12}}>
+          <label style={s.label}>Event Type</label>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8}}>
+            {['Game','Practice','Event'].map(t=><div key={t} onClick={()=>setAf(f=>({...f,eventType:t}))} style={{border:`0.5px solid ${af.eventType===t?(TYPE_BG[t]||G.black):'rgba(0,0,0,0.12)'}`,borderRadius:8,padding:'10px 8px',textAlign:'center',cursor:'pointer',background:af.eventType===t?`${TYPE_BG[t]}22`:G.white}}>
+              <div style={{fontSize:20,marginBottom:4}}>{TYPE_ICONS[t]}</div>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:11,letterSpacing:'0.8px',textTransform:'uppercase',color:af.eventType===t?(TYPE_BG[t]||G.black):G.muted}}>{t}</div>
+            </div>)}
+          </div>
+        </div>
+        <div style={{marginBottom:12}}><label style={s.label}>Sport</label><select style={s.input} value={af.sport} onChange={e=>setAf(f=>({...f,sport:e.target.value}))}><option value="">Select sport...</option>{(user.role==='coach'&&user.sport?[user.sport]:SPORTS.map(s=>s.key)).map(sp=><option key={sp} value={sp}>{sp}</option>)}</select></div>
+        <div style={{marginBottom:12}}><label style={s.label}>{af.eventType==='Game'?'Opponent':'Title'}</label><input style={s.input} placeholder={af.eventType==='Game'?'vs. Lincoln HS':af.eventType==='Practice'?'Practice Session':'Event Name'} value={af.title} onChange={e=>setAf(f=>({...f,title:e.target.value}))}/></div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:12}}>
+          <div><label style={s.label}>Month</label><select style={s.input} value={af.month} onChange={e=>setAf(f=>({...f,month:e.target.value}))}><option value="">Month...</option>{['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map(m=><option key={m} value={m}>{m}</option>)}</select></div>
+          <div><label style={s.label}>Day</label><select style={s.input} value={af.day} onChange={e=>setAf(f=>({...f,day:e.target.value}))}><option value="">Day...</option>{Array.from({length:31},(_,i)=>i+1).map(d=><option key={d} value={d}>{d}</option>)}</select></div>
+          <div><label style={s.label}>Time</label><select style={s.input} value={af.time} onChange={e=>setAf(f=>({...f,time:e.target.value}))}><option value="">Time...</option>{['6:00 AM','6:15 AM','6:30 AM','6:45 AM','7:00 AM','7:15 AM','7:30 AM','7:45 AM','8:00 AM','8:15 AM','8:30 AM','8:45 AM','9:00 AM','9:15 AM','9:30 AM','9:45 AM','10:00 AM','10:15 AM','10:30 AM','10:45 AM','11:00 AM','11:15 AM','11:30 AM','11:45 AM','12:00 PM','12:15 PM','12:30 PM','12:45 PM','1:00 PM','1:15 PM','1:30 PM','1:45 PM','2:00 PM','2:15 PM','2:30 PM','2:45 PM','3:00 PM','3:15 PM','3:30 PM','3:45 PM','4:00 PM','4:15 PM','4:30 PM','4:45 PM','5:00 PM','5:15 PM','5:30 PM','5:45 PM','6:00 PM','6:15 PM','6:30 PM','6:45 PM','7:00 PM','7:15 PM','7:30 PM','7:45 PM','8:00 PM','8:15 PM','8:30 PM','8:45 PM','9:00 PM','9:15 PM','9:30 PM','9:45 PM','10:00 PM'].map(t=><option key={t} value={t}>{t}</option>)}</select></div>
+        </div>
+        <div style={{marginBottom:12}}><label style={{fontSize:12,fontWeight:500,color:'#888',textTransform:'uppercase',letterSpacing:'0.8px',display:'block',marginBottom:5}}>Details / Location</label><LocationInput value={af.details} onChange={v=>setAf(f=>({...f,details:v}))} placeholder="e.g. Main Gym, 2815 Bikers St..."/></div>
+        <div style={{marginBottom:16}}>
+          <label style={s.label}>🔔 Send Reminder</label>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+            {REMINDER_OPTS.map(opt=><div key={opt.val} onClick={()=>setAf(f=>({...f,reminder:opt.val}))} style={{border:`0.5px solid ${af.reminder===opt.val?G.gold:'rgba(0,0,0,0.12)'}`,borderRadius:8,padding:'10px 12px',cursor:'pointer',background:af.reminder===opt.val?G.goldPale:G.white,display:'flex',alignItems:'center',gap:8}}>
+              <div style={{width:16,height:16,borderRadius:'50%',border:`2px solid ${af.reminder===opt.val?G.gold:'rgba(0,0,0,0.2)'}`,background:af.reminder===opt.val?G.gold:'transparent',flexShrink:0}}/>
+              <span style={{fontSize:13,color:G.black,fontWeight:af.reminder===opt.val?600:400}}>{opt.label}</span>
+            </div>)}
+          </div>
+          {af.reminder!=='none'&&<div style={{fontSize:12,color:'#7A5200',background:G.goldPale,padding:'8px 10px',borderRadius:6,marginTop:8,lineHeight:1.5}}>
+            ⏰ Athletes and parents will receive an Email + SMS reminder <strong>{REMINDER_OPTS.find(o=>o.val===af.reminder)?.label}</strong> this event.
+          </div>}
+        </div>
+        <div style={{display:'flex',gap:8}}><Btn variant="primary" onClick={saveEvent}>Add to Calendar</Btn><Btn variant="outline" onClick={()=>setAddModal(false)}>Cancel</Btn></div>
       </Modal>}
     </div>;
   }
