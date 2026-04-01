@@ -582,6 +582,8 @@ export default function App() {
   );
 
   // ── MAIN APP ──
+  const [showProfile, setShowProfile] = useState(false);
+
   return (
     <div style={s.page}>
       <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet"/>
@@ -594,15 +596,18 @@ export default function App() {
             <div style={s.tagline}>Athletics Program · Dallas, TX</div>
           </div>
           <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
-            <div style={{display:'flex',alignItems:'center',gap:8,background:'rgba(255,255,255,0.08)',border:'0.5px solid rgba(255,255,255,0.15)',borderRadius:20,padding:'6px 12px'}}>
+            <div onClick={()=>setShowProfile(true)} style={{display:'flex',alignItems:'center',gap:8,background:'rgba(255,255,255,0.08)',border:'0.5px solid rgba(255,255,255,0.15)',borderRadius:20,padding:'6px 12px',cursor:'pointer'}} title="Edit Profile">
               <strong style={{fontSize:12,color:G.gold}}>{userProfile.name?.split(' ')[0]}</strong>
               <Badge role={userProfile.role}>{userProfile.role}</Badge>
+              <span style={{fontSize:10,color:'rgba(255,255,255,0.4)'}}>✏️</span>
             </div>
             <button onClick={doLogout} style={{fontFamily:"'Oswald',sans-serif",fontSize:11,letterSpacing:'1px',textTransform:'uppercase',background:'transparent',border:'0.5px solid rgba(255,255,255,0.2)',color:'rgba(255,255,255,0.5)',padding:'5px 10px',borderRadius:6,cursor:'pointer'}}>Sign Out</button>
           </div>
         </div>
         <div style={s.goldBar}/>
       </div>
+
+      {showProfile&&<ProfileModal user={userProfile} onClose={()=>setShowProfile(false)} db={db} fdb={fdb} updateDoc={updateDoc} doc={doc} notify={notify} setUserProfile={setUserProfile} SPORTS={SPORTS} G={G} s={s}/>}
 
       <div style={s.nav}>
         {tabs.map((t,i)=>(
@@ -648,6 +653,154 @@ export default function App() {
         />
       </div>
       {toast&&<Toast msg={toast}/>}
+    </div>
+  );
+}
+
+// ─── PROFILE MODAL ────────────────────────────────────────────────────────────
+// ─── PROFILE MODAL ────────────────────────────────────────────────────────────
+function ProfileModal({user, onClose, db, fdb, updateDoc, doc, notify, setUserProfile, SPORTS, G, s}) {
+  const [name, setName] = React.useState(user.name||'');
+  const [phone, setPhone] = React.useState(user.phone||'');
+  const [jersey, setJersey] = React.useState(user.jersey||'');
+  const [grade, setGrade] = React.useState(user.grade||'9th');
+  const [sport, setSport] = React.useState(user.sport||'');
+  const [sports, setSports] = React.useState(user.sports||[user.sport].filter(Boolean));
+  const [gradYear, setGradYear] = React.useState(user.gradYear||'');
+  const [sportPlayed, setSportPlayed] = React.useState(user.sportPlayed||'');
+  const [saving, setSaving] = React.useState(false);
+  const [saved, setSaved] = React.useState(false);
+
+  const toggleSport = (sp) => {
+    setSports(prev => prev.includes(sp) ? prev.filter(x=>x!==sp) : [...prev, sp]);
+  };
+
+  const save = async () => {
+    if(!name.trim()){notify('Name is required.');return;}
+    setSaving(true);
+    try {
+      const updates = {
+        name: name.trim(),
+        phone: phone.trim(),
+        ...(user.role==='athlete' ? {jersey, grade, sport: sports[0]||null, sports} : {}),
+        ...(user.role==='coach' ? {sport} : {}),
+        ...(user.role==='alumni' ? {gradYear, sportPlayed} : {}),
+      };
+      await updateDoc(doc(db, 'users', user.id), updates);
+      setUserProfile(u => ({...u, ...updates}));
+      setSaved(true);
+      notify('Profile updated! ✅');
+      setTimeout(() => { setSaved(false); onClose(); }, 1200);
+    } catch(e) {
+      notify('Error saving profile. Please try again.');
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div
+      onClick={e => { if(e.target === e.currentTarget) onClose(); }}
+      style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:600,display:'flex',alignItems:'center',justifyContent:'center',padding:'16px'}}
+    >
+      <div style={{background:'#fff',borderRadius:12,padding:24,width:'100%',maxWidth:460,maxHeight:'90vh',overflowY:'auto'}}>
+
+        {/* Header */}
+        <div style={{display:'flex',alignItems:'center',gap:14,marginBottom:20}}>
+          <div style={{width:48,height:48,borderRadius:'50%',background:'#0d0d0d',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+            <span style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:700,color:'#c9961a'}}>{(user.name||'?').charAt(0).toUpperCase()}</span>
+          </div>
+          <div style={{flex:1}}>
+            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:17,fontWeight:600,color:'#0d0d0d'}}>{user.name}</div>
+            <div style={{fontSize:12,color:'#888',marginTop:2}}>{user.role} · {user.email}</div>
+          </div>
+          <button onClick={onClose} style={{background:'none',border:'none',fontSize:22,cursor:'pointer',color:'#888',padding:'0 4px'}}>✕</button>
+        </div>
+
+        {/* Name */}
+        <div style={{marginBottom:12}}>
+          <label style={{fontSize:11,fontWeight:500,color:'#888',textTransform:'uppercase',letterSpacing:'0.8px',display:'block',marginBottom:5}}>Full Name</label>
+          <input style={{width:'100%',padding:'9px 12px',border:'0.5px solid rgba(0,0,0,0.18)',borderRadius:7,fontSize:14,color:'#0d0d0d',background:'#fff',outline:'none',boxSizing:'border-box'}} value={name} onChange={e=>setName(e.target.value)}/>
+        </div>
+
+        {/* Phone */}
+        <div style={{marginBottom:12}}>
+          <label style={{fontSize:11,fontWeight:500,color:'#888',textTransform:'uppercase',letterSpacing:'0.8px',display:'block',marginBottom:5}}>Phone (for SMS alerts)</label>
+          <input style={{width:'100%',padding:'9px 12px',border:'0.5px solid rgba(0,0,0,0.18)',borderRadius:7,fontSize:14,color:'#0d0d0d',background:'#fff',outline:'none',boxSizing:'border-box'}} type="tel" placeholder="(214) 555-0100" value={phone} onChange={e=>setPhone(e.target.value)}/>
+        </div>
+
+        {/* Athlete fields */}
+        {user.role==='athlete' && <>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+            <div>
+              <label style={{fontSize:11,fontWeight:500,color:'#888',textTransform:'uppercase',letterSpacing:'0.8px',display:'block',marginBottom:5}}>Jersey #</label>
+              <input style={{width:'100%',padding:'9px 12px',border:'0.5px solid rgba(0,0,0,0.18)',borderRadius:7,fontSize:14,color:'#0d0d0d',background:'#fff',outline:'none',boxSizing:'border-box'}} placeholder="12" value={jersey} onChange={e=>setJersey(e.target.value)}/>
+            </div>
+            <div>
+              <label style={{fontSize:11,fontWeight:500,color:'#888',textTransform:'uppercase',letterSpacing:'0.8px',display:'block',marginBottom:5}}>Grade</label>
+              <select style={{width:'100%',padding:'9px 12px',border:'0.5px solid rgba(0,0,0,0.18)',borderRadius:7,fontSize:14,color:'#0d0d0d',background:'#fff',outline:'none',boxSizing:'border-box'}} value={grade} onChange={e=>setGrade(e.target.value)}>
+                {['9th','10th','11th','12th'].map(g=><option key={g}>{g}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{marginBottom:16}}>
+            <label style={{fontSize:11,fontWeight:500,color:'#888',textTransform:'uppercase',letterSpacing:'0.8px',display:'block',marginBottom:6}}>My Sports</label>
+            <div style={{fontSize:12,color:'#888',marginBottom:8}}>Tap to add or remove. Coaches approve each sport.</div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:6}}>
+              {SPORTS.map(sp => {
+                const active = sports.includes(sp.key);
+                return (
+                  <div key={sp.key} onClick={()=>toggleSport(sp.key)} style={{border:`1px solid ${active?'#c9961a':'rgba(0,0,0,0.1)'}`,borderRadius:8,padding:'8px 4px',textAlign:'center',cursor:'pointer',background:active?'#fdf3d8':'#fff'}}>
+                    <div style={{fontSize:18,marginBottom:2}}>{sp.icon}</div>
+                    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:8,letterSpacing:'0.5px',textTransform:'uppercase',color:active?'#92640a':'#aaa',lineHeight:1.2}}>{sp.key.replace("Men's","M").replace("Women's","W")}</div>
+                  </div>
+                );
+              })}
+            </div>
+            {sports.length>0 && <div style={{fontSize:12,color:'#1a6636',marginTop:8,background:'#e6f4ec',padding:'6px 10px',borderRadius:6}}>✅ {sports.join(', ')}</div>}
+          </div>
+        </>}
+
+        {/* Coach fields */}
+        {user.role==='coach' && (
+          <div style={{marginBottom:12}}>
+            <label style={{fontSize:11,fontWeight:500,color:'#888',textTransform:'uppercase',letterSpacing:'0.8px',display:'block',marginBottom:5}}>Sport</label>
+            <select style={{width:'100%',padding:'9px 12px',border:'0.5px solid rgba(0,0,0,0.18)',borderRadius:7,fontSize:14,color:'#0d0d0d',background:'#fff',outline:'none',boxSizing:'border-box'}} value={sport} onChange={e=>setSport(e.target.value)}>
+              <option value="">Select sport...</option>
+              {SPORTS.map(sp=><option key={sp.key} value={sp.key}>{sp.key}</option>)}
+            </select>
+          </div>
+        )}
+
+        {/* Alumni fields */}
+        {user.role==='alumni' && (
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+            <div>
+              <label style={{fontSize:11,fontWeight:500,color:'#888',textTransform:'uppercase',letterSpacing:'0.8px',display:'block',marginBottom:5}}>Grad Year</label>
+              <input style={{width:'100%',padding:'9px 12px',border:'0.5px solid rgba(0,0,0,0.18)',borderRadius:7,fontSize:14,color:'#0d0d0d',background:'#fff',outline:'none',boxSizing:'border-box'}} placeholder="2018" value={gradYear} onChange={e=>setGradYear(e.target.value)}/>
+            </div>
+            <div>
+              <label style={{fontSize:11,fontWeight:500,color:'#888',textTransform:'uppercase',letterSpacing:'0.8px',display:'block',marginBottom:5}}>Sport Played</label>
+              <input style={{width:'100%',padding:'9px 12px',border:'0.5px solid rgba(0,0,0,0.18)',borderRadius:7,fontSize:14,color:'#0d0d0d',background:'#fff',outline:'none',boxSizing:'border-box'}} placeholder="Football" value={sportPlayed} onChange={e=>setSportPlayed(e.target.value)}/>
+            </div>
+          </div>
+        )}
+
+        {/* Success */}
+        {saved && <div style={{background:'#e6f4ec',color:'#1a6636',fontSize:13,padding:'8px 12px',borderRadius:6,marginBottom:12,textAlign:'center'}}>✅ Profile saved!</div>}
+
+        {/* Buttons */}
+        <div style={{display:'flex',gap:8,marginTop:4}}>
+          <button
+            onClick={save}
+            disabled={saving}
+            style={{flex:1,fontFamily:"'Oswald',sans-serif",fontSize:13,fontWeight:500,letterSpacing:'1px',textTransform:'uppercase',padding:'11px 20px',borderRadius:7,cursor:'pointer',border:'none',background:'#0d0d0d',color:'#c9961a',opacity:saving?0.6:1}}
+          >{saving?'Saving...':'Save Changes'}</button>
+          <button
+            onClick={onClose}
+            style={{fontFamily:"'Oswald',sans-serif",fontSize:13,fontWeight:500,letterSpacing:'1px',textTransform:'uppercase',padding:'11px 20px',borderRadius:7,cursor:'pointer',border:'0.5px solid rgba(0,0,0,0.2)',background:'transparent',color:'#0d0d0d'}}
+          >Cancel</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1585,13 +1738,28 @@ function AppContent({user, tab, setTab, notify, fdb, db, storage, storageRef, up
     const [typeFilter, setTypeFilter] = useState('All');
     const [sportFilter, setSportFilter] = useState('All');
     const [addModal, setAddModal] = useState(false);
+    const [confirmDelete, setConfirmDelete] = useState(false);
     const [af, setAf] = useState({eventType:'Practice',sport:'',title:'',details:'',month:'',day:'',time:'',audience:'all',reminder:'none'});
 
     const canAdd = user.role==='admin'||user.role==='coach';
+    const canDelete = user.role==='admin'||user.role==='coach';
+
+    const deleteItem = async () => {
+      if(!selectedItem) return;
+      if(selectedItem.eventType==='Game') {
+        await fdb.delete('schedules', selectedItem.id);
+      } else {
+        await fdb.delete('events', selectedItem.id);
+      }
+      setSelectedItem(null);
+      setConfirmDelete(false);
+      notify('Event removed from calendar.');
+    };
 
     const REMINDER_OPTS = [
       {val:'none',label:'No reminder'},
       {val:'2hrs',label:'2 hours before'},
+      {val:'12hrs',label:'12 hours before'},
       {val:'1day',label:'1 day before'},
       {val:'2days',label:'2 days before'},
       {val:'1week',label:'1 week before'},
@@ -1640,7 +1808,7 @@ function AppContent({user, tab, setTab, notify, fdb, db, storage, storageRef, up
       if(!af.sport||!af.title||!af.month||!af.day){notify('Please fill in all required fields.');return;}
       await addEvent({...af});
       if(af.reminder!=='none') {
-        const reminderLabels = {'2hrs':'2 hours','1day':'1 day','2days':'2 days','1week':'1 week'};
+        const reminderLabels = {'2hrs':'2 hours','12hrs':'12 hours','1day':'1 day','2days':'2 days','1week':'1 week'};
         const reminderMsg = `Reminder: ${af.sport} ${af.eventType.toLowerCase()} — ${af.title} on ${af.month} ${af.day}${af.time?` at ${af.time}`:''}${af.details?`. ${af.details}`:''}. lgpathletics.net`;
         await scheduleReminder({type:af.eventType.toLowerCase(),sport:af.sport,message:reminderMsg,date:`${af.month} ${af.day}`,reminderTiming:af.reminder,reminderLabel:reminderLabels[af.reminder]||af.reminder,sent:false});
       }
@@ -1698,13 +1866,14 @@ function AppContent({user, tab, setTab, notify, fdb, db, storage, storageRef, up
       <Card style={{marginTop:12}}>
         <CardTitle>{MONTHS[viewMonth]} Schedule</CardTitle>
         {monthItems.length===0?<Empty msg={`Nothing scheduled in ${MONTHS[viewMonth]}.`}/>:
-          monthItems.map(item=><div key={item.itemId} onClick={()=>setSelectedItem(item)} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',borderBottom:`0.5px solid ${G.off}`,cursor:'pointer'}}>
-            <div style={{width:38,height:38,borderRadius:8,background:TYPE_BG[item.eventType]||G.black,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontSize:18}}>{TYPE_ICONS[item.eventType]}</div>
-            <div style={{flex:1}}>
+          monthItems.map(item=><div key={item.itemId} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',borderBottom:`0.5px solid ${G.off}`}}>
+            <div onClick={()=>setSelectedItem(item)} style={{width:38,height:38,borderRadius:8,background:TYPE_BG[item.eventType]||G.black,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontSize:18,cursor:'pointer'}}>{TYPE_ICONS[item.eventType]}</div>
+            <div onClick={()=>setSelectedItem(item)} style={{flex:1,cursor:'pointer'}}>
               <div style={{fontWeight:600,fontSize:13,color:G.black}}>{item.title}</div>
               <div style={{fontSize:12,color:G.muted}}>{item.sport} · {item.month} {item.day}{item.time?` · ${item.time}`:''}{item.details?<span> · <LocationLink text={item.details}/></span>:''}</div>
             </div>
             <span style={{fontFamily:"'Oswald',sans-serif",fontSize:10,padding:'2px 7px',borderRadius:4,background:item.eventType==='Game'?G.off:item.eventType==='Practice'?'#e6f4ec':'#fdf3d8',color:item.eventType==='Game'?G.black:item.eventType==='Practice'?G.green:G.gold}}>{item.eventType}</span>
+            {canDelete&&<button onClick={async(e)=>{e.stopPropagation();if(window.confirm(`Remove "${item.title}" from the calendar?`)){if(item.eventType==='Game'){await fdb.delete('schedules',item.id);}else{await fdb.delete('events',item.id);}notify('Removed!');}}} style={{background:'none',border:'none',cursor:'pointer',fontSize:16,color:G.muted,padding:'4px',flexShrink:0}}>🗑</button>}
           </div>)
         }
       </Card>
@@ -1736,12 +1905,27 @@ function AppContent({user, tab, setTab, notify, fdb, db, storage, storageRef, up
           </div>)}
         </div>
         {selectedItem.notes&&<div style={{fontSize:13,color:'#555',background:G.off,borderRadius:7,padding:'10px 12px',marginBottom:14,lineHeight:1.6}}>{selectedItem.notes}</div>}
-        {selectedItem.reminder&&selectedItem.reminder!=='none'&&<div style={{fontSize:12,color:'#7A5200',background:G.goldPale,padding:'8px 10px',borderRadius:6,marginBottom:14,lineHeight:1.5}}>⏰ Reminder set: <strong>{{'2hrs':'2 hours before','1day':'1 day before','2days':'2 days before','1week':'1 week before'}[selectedItem.reminder]||selectedItem.reminder}</strong> — Email + SMS to athletes & parents</div>}
+        {selectedItem.reminder&&selectedItem.reminder!=='none'&&<div style={{fontSize:12,color:'#7A5200',background:G.goldPale,padding:'8px 10px',borderRadius:6,marginBottom:14,lineHeight:1.5}}>⏰ Reminder set: <strong>{{'2hrs':'2 hours before','12hrs':'12 hours before','1day':'1 day before','2days':'2 days before','1week':'1 week before'}[selectedItem.reminder]||selectedItem.reminder}</strong> — Email + SMS to athletes & parents</div>}
         {selectedItem.liveScore?.live&&<div style={{background:G.redBg,borderRadius:8,padding:'12px',textAlign:'center',marginBottom:14}}>
           <div style={{fontSize:10,fontFamily:"'Oswald',sans-serif",letterSpacing:'1px',color:G.red,marginBottom:6}}>● LIVE · {selectedItem.liveScore.quarter}</div>
           <div style={{fontFamily:"'Oswald',sans-serif",fontSize:32,fontWeight:700,color:G.black}}>Vikings {selectedItem.liveScore.us} – {selectedItem.liveScore.them}</div>
         </div>}
-        <Btn variant="outline" style={{width:'100%'}} onClick={()=>setSelectedItem(null)}>Close</Btn>
+        {confirmDelete ? (
+          <div>
+            <div style={{fontSize:13,color:G.red,background:G.redBg,padding:'10px 12px',borderRadius:6,marginBottom:12,lineHeight:1.5}}>
+              ⚠️ Are you sure you want to remove <strong>{selectedItem.title}</strong> from the calendar? This cannot be undone.
+            </div>
+            <div style={{display:'flex',gap:8}}>
+              <Btn variant="danger" onClick={deleteItem}>Yes, Remove</Btn>
+              <Btn variant="outline" onClick={()=>setConfirmDelete(false)}>Cancel</Btn>
+            </div>
+          </div>
+        ) : (
+          <div style={{display:'flex',gap:8}}>
+            <Btn variant="outline" style={{flex:1}} onClick={()=>setSelectedItem(null)}>Close</Btn>
+            {canDelete&&<Btn variant="danger" onClick={()=>setConfirmDelete(true)}>🗑 Remove</Btn>}
+          </div>
+        )}
       </Modal>}
 
       {/* Add event modal */}
