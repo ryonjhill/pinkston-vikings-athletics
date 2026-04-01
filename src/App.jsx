@@ -253,7 +253,7 @@ function Toast({msg}){
 }
 
 function PhotoGrid({photos,onPhotoClick}){
-  const [hov,setHov]=useState(null);
+  const [hov,setHov]=React.useState(null);
   return <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:16}}>
     {photos.map((p,i)=><div key={p.id||i} onClick={()=>onPhotoClick(i)} onMouseEnter={()=>setHov(p.id)} onMouseLeave={()=>setHov(null)}
       style={{position:'relative',aspectRatio:'1',borderRadius:8,overflow:'hidden',cursor:'pointer',background:G.off}}>
@@ -271,7 +271,7 @@ function PhotoGrid({photos,onPhotoClick}){
 
 function Lightbox({photos,idx,onClose,onNav}){
   const p=photos[idx];
-  useEffect(()=>{
+  React.useEffect(()=>{
     const h=e=>{if(e.key==='ArrowLeft')onNav(-1);if(e.key==='ArrowRight')onNav(1);if(e.key==='Escape')onClose();};
     window.addEventListener('keydown',h);return()=>window.removeEventListener('keydown',h);
   },[onNav,onClose]);
