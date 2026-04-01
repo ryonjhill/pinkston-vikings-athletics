@@ -658,151 +658,109 @@ export default function App() {
 }
 
 // ─── PROFILE MODAL ────────────────────────────────────────────────────────────
-// ─── PROFILE MODAL ────────────────────────────────────────────────────────────
 function ProfileModal({user, onClose, db, fdb, updateDoc, doc, notify, setUserProfile, SPORTS, G, s}) {
-  const [name, setName] = React.useState(user.name||'');
-  const [phone, setPhone] = React.useState(user.phone||'');
-  const [jersey, setJersey] = React.useState(user.jersey||'');
-  const [grade, setGrade] = React.useState(user.grade||'9th');
-  const [sport, setSport] = React.useState(user.sport||'');
-  const [sports, setSports] = React.useState(user.sports||[user.sport].filter(Boolean));
-  const [gradYear, setGradYear] = React.useState(user.gradYear||'');
-  const [sportPlayed, setSportPlayed] = React.useState(user.sportPlayed||'');
-  const [saving, setSaving] = React.useState(false);
-  const [saved, setSaved] = React.useState(false);
+  const [f, setF] = useState({
+    name: user.name||'',
+    phone: user.phone||'',
+    jersey: user.jersey||'',
+    grade: user.grade||'9th',
+    sport: user.sport||'',
+    sports: user.sports||[user.sport].filter(Boolean),
+    gradYear: user.gradYear||'',
+    sportPlayed: user.sportPlayed||'',
+  });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   const toggleSport = (sp) => {
-    setSports(prev => prev.includes(sp) ? prev.filter(x=>x!==sp) : [...prev, sp]);
+    setF(f=>({...f, sports: f.sports.includes(sp) ? f.sports.filter(s=>s!==sp) : [...f.sports, sp]}));
   };
 
   const save = async () => {
-    if(!name.trim()){notify('Name is required.');return;}
     setSaving(true);
-    try {
-      const updates = {
-        name: name.trim(),
-        phone: phone.trim(),
-        ...(user.role==='athlete' ? {jersey, grade, sport: sports[0]||null, sports} : {}),
-        ...(user.role==='coach' ? {sport} : {}),
-        ...(user.role==='alumni' ? {gradYear, sportPlayed} : {}),
-      };
-      await updateDoc(doc(db, 'users', user.id), updates);
-      setUserProfile(u => ({...u, ...updates}));
-      setSaved(true);
-      notify('Profile updated! ✅');
-      setTimeout(() => { setSaved(false); onClose(); }, 1200);
-    } catch(e) {
-      notify('Error saving profile. Please try again.');
-    }
+    const updates = {
+      name: f.name,
+      phone: f.phone,
+      ...(user.role==='athlete'?{jersey:f.jersey, grade:f.grade, sport:f.sports[0]||null, sports:f.sports}:{}),
+      ...(user.role==='coach'?{sport:f.sport}:{}),
+      ...(user.role==='alumni'?{gradYear:f.gradYear, sportPlayed:f.sportPlayed}:{}),
+    };
+    await updateDoc(doc(db,'users',user.id), updates);
+    setUserProfile(u=>({...u,...updates}));
     setSaving(false);
+    setSaved(true);
+    setTimeout(()=>{setSaved(false);onClose();}, 1200);
+    notify('Profile updated! ✅');
   };
 
-  return (
-    <div
-      onClick={e => { if(e.target === e.currentTarget) onClose(); }}
-      style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:600,display:'flex',alignItems:'center',justifyContent:'center',padding:'16px'}}
-    >
-      <div style={{background:'#fff',borderRadius:12,padding:24,width:'100%',maxWidth:460,maxHeight:'90vh',overflowY:'auto'}}>
-
-        {/* Header */}
-        <div style={{display:'flex',alignItems:'center',gap:14,marginBottom:20}}>
-          <div style={{width:48,height:48,borderRadius:'50%',background:'#0d0d0d',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-            <span style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:700,color:'#c9961a'}}>{(user.name||'?').charAt(0).toUpperCase()}</span>
-          </div>
-          <div style={{flex:1}}>
-            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:17,fontWeight:600,color:'#0d0d0d'}}>{user.name}</div>
-            <div style={{fontSize:12,color:'#888',marginTop:2}}>{user.role} · {user.email}</div>
-          </div>
-          <button onClick={onClose} style={{background:'none',border:'none',fontSize:22,cursor:'pointer',color:'#888',padding:'0 4px'}}>✕</button>
+  return <div onClick={e=>{if(e.target===e.currentTarget)onClose();}} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:500,display:'flex',alignItems:'center',justifyContent:'center'}}>
+    <div style={{background:G.white,borderRadius:12,padding:24,width:'90%',maxWidth:460,maxHeight:'88vh',overflowY:'auto'}}>
+      {/* Header */}
+      <div style={{display:'flex',alignItems:'center',gap:14,marginBottom:20}}>
+        <div style={{width:52,height:52,borderRadius:'50%',background:G.black,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+          <span style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,color:G.gold}}>{user.name?.charAt(0)||'?'}</span>
         </div>
-
-        {/* Name */}
-        <div style={{marginBottom:12}}>
-          <label style={{fontSize:11,fontWeight:500,color:'#888',textTransform:'uppercase',letterSpacing:'0.8px',display:'block',marginBottom:5}}>Full Name</label>
-          <input style={{width:'100%',padding:'9px 12px',border:'0.5px solid rgba(0,0,0,0.18)',borderRadius:7,fontSize:14,color:'#0d0d0d',background:'#fff',outline:'none',boxSizing:'border-box'}} value={name} onChange={e=>setName(e.target.value)}/>
+        <div>
+          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:600,color:G.black}}>{user.name}</div>
+          <div style={{fontSize:12,color:G.muted,marginTop:2,textTransform:'capitalize'}}>{user.role} · {user.email}</div>
         </div>
+        <button onClick={onClose} style={{marginLeft:'auto',background:'none',border:'none',fontSize:20,cursor:'pointer',color:G.muted}}>✕</button>
+      </div>
 
-        {/* Phone */}
-        <div style={{marginBottom:12}}>
-          <label style={{fontSize:11,fontWeight:500,color:'#888',textTransform:'uppercase',letterSpacing:'0.8px',display:'block',marginBottom:5}}>Phone (for SMS alerts)</label>
-          <input style={{width:'100%',padding:'9px 12px',border:'0.5px solid rgba(0,0,0,0.18)',borderRadius:7,fontSize:14,color:'#0d0d0d',background:'#fff',outline:'none',boxSizing:'border-box'}} type="tel" placeholder="(214) 555-0100" value={phone} onChange={e=>setPhone(e.target.value)}/>
+      {/* Fields */}
+      <div style={{marginBottom:12}}><label style={s.label}>Full Name</label><input style={s.input} value={f.name} onChange={e=>setF(x=>({...x,name:e.target.value}))}/></div>
+      <div style={{marginBottom:12}}><label style={s.label}>Phone (for SMS alerts)</label><input style={s.input} type="tel" placeholder="(214) 555-0100" value={f.phone} onChange={e=>setF(x=>({...x,phone:e.target.value}))}/></div>
+
+      {/* Athlete-specific */}
+      {user.role==='athlete'&&<>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+          <div><label style={s.label}>Jersey #</label><input style={s.input} placeholder="12" value={f.jersey} onChange={e=>setF(x=>({...x,jersey:e.target.value}))}/></div>
+          <div><label style={s.label}>Grade</label><select style={s.input} value={f.grade} onChange={e=>setF(x=>({...x,grade:e.target.value}))}>{['9th','10th','11th','12th'].map(g=><option key={g}>{g}</option>)}</select></div>
         </div>
-
-        {/* Athlete fields */}
-        {user.role==='athlete' && <>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
-            <div>
-              <label style={{fontSize:11,fontWeight:500,color:'#888',textTransform:'uppercase',letterSpacing:'0.8px',display:'block',marginBottom:5}}>Jersey #</label>
-              <input style={{width:'100%',padding:'9px 12px',border:'0.5px solid rgba(0,0,0,0.18)',borderRadius:7,fontSize:14,color:'#0d0d0d',background:'#fff',outline:'none',boxSizing:'border-box'}} placeholder="12" value={jersey} onChange={e=>setJersey(e.target.value)}/>
-            </div>
-            <div>
-              <label style={{fontSize:11,fontWeight:500,color:'#888',textTransform:'uppercase',letterSpacing:'0.8px',display:'block',marginBottom:5}}>Grade</label>
-              <select style={{width:'100%',padding:'9px 12px',border:'0.5px solid rgba(0,0,0,0.18)',borderRadius:7,fontSize:14,color:'#0d0d0d',background:'#fff',outline:'none',boxSizing:'border-box'}} value={grade} onChange={e=>setGrade(e.target.value)}>
-                {['9th','10th','11th','12th'].map(g=><option key={g}>{g}</option>)}
-              </select>
-            </div>
+        <div style={{marginBottom:16}}>
+          <label style={s.label}>My Sports</label>
+          <div style={{fontSize:12,color:G.muted,marginBottom:8}}>Select all sports you play. Coaches will approve your request to join their team.</div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:6}}>
+            {SPORTS.map(sp=>{
+              const joined = f.sports.includes(sp.key);
+              return <div key={sp.key} onClick={()=>toggleSport(sp.key)} style={{border:`0.5px solid ${joined?G.gold:'rgba(0,0,0,0.12)'}`,borderRadius:8,padding:'8px 6px',textAlign:'center',cursor:'pointer',background:joined?G.goldPale:G.white}}>
+                <div style={{fontSize:16,marginBottom:2}}>{sp.icon}</div>
+                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:9,letterSpacing:'0.5px',textTransform:'uppercase',color:joined?G.gold:G.muted}}>{sp.key.split(' ').pop()}</div>
+              </div>;
+            })}
           </div>
-          <div style={{marginBottom:16}}>
-            <label style={{fontSize:11,fontWeight:500,color:'#888',textTransform:'uppercase',letterSpacing:'0.8px',display:'block',marginBottom:6}}>My Sports</label>
-            <div style={{fontSize:12,color:'#888',marginBottom:8}}>Tap to add or remove. Coaches approve each sport.</div>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:6}}>
-              {SPORTS.map(sp => {
-                const active = sports.includes(sp.key);
-                return (
-                  <div key={sp.key} onClick={()=>toggleSport(sp.key)} style={{border:`1px solid ${active?'#c9961a':'rgba(0,0,0,0.1)'}`,borderRadius:8,padding:'8px 4px',textAlign:'center',cursor:'pointer',background:active?'#fdf3d8':'#fff'}}>
-                    <div style={{fontSize:18,marginBottom:2}}>{sp.icon}</div>
-                    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:8,letterSpacing:'0.5px',textTransform:'uppercase',color:active?'#92640a':'#aaa',lineHeight:1.2}}>{sp.key.replace("Men's","M").replace("Women's","W")}</div>
-                  </div>
-                );
-              })}
-            </div>
-            {sports.length>0 && <div style={{fontSize:12,color:'#1a6636',marginTop:8,background:'#e6f4ec',padding:'6px 10px',borderRadius:6}}>✅ {sports.join(', ')}</div>}
-          </div>
-        </>}
-
-        {/* Coach fields */}
-        {user.role==='coach' && (
-          <div style={{marginBottom:12}}>
-            <label style={{fontSize:11,fontWeight:500,color:'#888',textTransform:'uppercase',letterSpacing:'0.8px',display:'block',marginBottom:5}}>Sport</label>
-            <select style={{width:'100%',padding:'9px 12px',border:'0.5px solid rgba(0,0,0,0.18)',borderRadius:7,fontSize:14,color:'#0d0d0d',background:'#fff',outline:'none',boxSizing:'border-box'}} value={sport} onChange={e=>setSport(e.target.value)}>
-              <option value="">Select sport...</option>
-              {SPORTS.map(sp=><option key={sp.key} value={sp.key}>{sp.key}</option>)}
-            </select>
-          </div>
-        )}
-
-        {/* Alumni fields */}
-        {user.role==='alumni' && (
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
-            <div>
-              <label style={{fontSize:11,fontWeight:500,color:'#888',textTransform:'uppercase',letterSpacing:'0.8px',display:'block',marginBottom:5}}>Grad Year</label>
-              <input style={{width:'100%',padding:'9px 12px',border:'0.5px solid rgba(0,0,0,0.18)',borderRadius:7,fontSize:14,color:'#0d0d0d',background:'#fff',outline:'none',boxSizing:'border-box'}} placeholder="2018" value={gradYear} onChange={e=>setGradYear(e.target.value)}/>
-            </div>
-            <div>
-              <label style={{fontSize:11,fontWeight:500,color:'#888',textTransform:'uppercase',letterSpacing:'0.8px',display:'block',marginBottom:5}}>Sport Played</label>
-              <input style={{width:'100%',padding:'9px 12px',border:'0.5px solid rgba(0,0,0,0.18)',borderRadius:7,fontSize:14,color:'#0d0d0d',background:'#fff',outline:'none',boxSizing:'border-box'}} placeholder="Football" value={sportPlayed} onChange={e=>setSportPlayed(e.target.value)}/>
-            </div>
-          </div>
-        )}
-
-        {/* Success */}
-        {saved && <div style={{background:'#e6f4ec',color:'#1a6636',fontSize:13,padding:'8px 12px',borderRadius:6,marginBottom:12,textAlign:'center'}}>✅ Profile saved!</div>}
-
-        {/* Buttons */}
-        <div style={{display:'flex',gap:8,marginTop:4}}>
-          <button
-            onClick={save}
-            disabled={saving}
-            style={{flex:1,fontFamily:"'Oswald',sans-serif",fontSize:13,fontWeight:500,letterSpacing:'1px',textTransform:'uppercase',padding:'11px 20px',borderRadius:7,cursor:'pointer',border:'none',background:'#0d0d0d',color:'#c9961a',opacity:saving?0.6:1}}
-          >{saving?'Saving...':'Save Changes'}</button>
-          <button
-            onClick={onClose}
-            style={{fontFamily:"'Oswald',sans-serif",fontSize:13,fontWeight:500,letterSpacing:'1px',textTransform:'uppercase',padding:'11px 20px',borderRadius:7,cursor:'pointer',border:'0.5px solid rgba(0,0,0,0.2)',background:'transparent',color:'#0d0d0d'}}
-          >Cancel</button>
+          {f.sports.length>0&&<div style={{fontSize:12,color:G.green,marginTop:8}}>✅ {f.sports.join(', ')}</div>}
         </div>
+      </>}
+
+      {/* Coach-specific */}
+      {user.role==='coach'&&<div style={{marginBottom:12}}>
+        <label style={s.label}>Sport</label>
+        <select style={s.input} value={f.sport} onChange={e=>setF(x=>({...x,sport:e.target.value}))}>
+          <option value="">Select sport...</option>
+          {SPORTS.map(sp=><option key={sp.key} value={sp.key}>{sp.key}</option>)}
+        </select>
+      </div>}
+
+      {/* Alumni-specific */}
+      {user.role==='alumni'&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+        <div><label style={s.label}>Grad Year</label><input style={s.input} placeholder="2018" value={f.gradYear} onChange={e=>setF(x=>({...x,gradYear:e.target.value}))}/></div>
+        <div><label style={s.label}>Sport Played</label><input style={s.input} placeholder="Football" value={f.sportPlayed} onChange={e=>setF(x=>({...x,sportPlayed:e.target.value}))}/></div>
+      </div>}
+
+      {/* Password reset */}
+      <div style={{background:G.off,borderRadius:8,padding:'10px 12px',marginBottom:16,fontSize:13,color:G.muted}}>
+        Want to change your password? <button onClick={()=>{}} style={{background:'none',border:'none',color:G.gold,cursor:'pointer',fontSize:13,textDecoration:'underline',padding:0}}>Send reset email</button>
+      </div>
+
+      {saved&&<div style={{background:G.greenBg,color:G.green,fontSize:13,padding:'8px 12px',borderRadius:6,marginBottom:12,textAlign:'center'}}>✅ Profile saved!</div>}
+
+      <div style={{display:'flex',gap:8}}>
+        <Btn variant="primary" style={{flex:1}} onClick={save} disabled={saving}>{saving?'Saving...':'Save Changes'}</Btn>
+        <Btn variant="outline" onClick={onClose}>Cancel</Btn>
       </div>
     </div>
-  );
+  </div>;
 }
 
 // ─── APP CONTENT (receives all props) ────────────────────────────────────────
