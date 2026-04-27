@@ -671,6 +671,8 @@ function AppContent({user, tab, setTab, notify, fdb, db, storage, storageRef, up
   const [schedules, setSchedules] = useState([]);
   const [events, setEvents] = useState([]);
   const [announcements, setAnnouncements] = useState([]);
+  const [playerStats, setPlayerStats] = useState([]);
+  const [gameStats, setGameStats] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [photos, setPhotos] = useState([]);
@@ -691,6 +693,8 @@ function AppContent({user, tab, setTab, notify, fdb, db, storage, storageRef, up
     unsubs.push(fdb.listen('schedules',[orderBy('createdAt','desc')],setSchedules));
     unsubs.push(fdb.listen('events',[orderBy('createdAt','desc')],setEvents));
     unsubs.push(fdb.listen('announcements',[orderBy('createdAt','desc')],setAnnouncements));
+    unsubs.push(fdb.listen('playerStats',[],setPlayerStats));
+    unsubs.push(fdb.listen('gameStats',[orderBy('createdAt','desc')],setGameStats));
     unsubs.push(fdb.listen('photos',[where('approved','==',true)],setPhotos));
 
     // Parents only pull their own child's attendance
@@ -1355,12 +1359,268 @@ function AppContent({user, tab, setTab, notify, fdb, db, storage, storageRef, up
   // STATS
   // ─────────────────────────────────────────────────────────────────────────
   function StatsTab() {
+    const [sportFilter, setSportFilter] = useState('Football');
+    const [statModal, setStatModal] = useState(false);
+    const [selectedPlayer, setSelectedPlayer] = useState(null);
+    const [gameRef, setGameRef] = useState('');
+    const [statInputs, setStatInputs] = useState({});
+    const [saving, setSaving] = useState(false);
+    const [viewPlayer, setViewPlayer] = useState(null);
+
+    const canEdit = user.role==='coach'||user.role==='admin';
+
+    // Position groups and their stats
+    const POSITION_STATS = {
+      QB: [
+        {key:'passYds',label:'Pass Yds',short:'PYD'},{key:'passAtt',label:'Pass Att',short:'ATT'},
+        {key:'passComp',label:'Completions',short:'CMP'},{key:'passTDs',label:'Pass TDs',short:'PTD'},
+        {key:'ints',label:'Interceptions',short:'INT'},{key:'rushYds',label:'Rush Yds',short:'RYD'},
+        {key:'rushAtt',label:'Rush Att',short:'RA'},{key:'rushTDs',label:'Rush TDs',short:'RTD'},
+        {key:'fumbles',label:'Fumbles',short:'FUM'},
+      ],
+      RB: [
+        {key:'rushYds',label:'Rush Yds',short:'RYD'},{key:'rushAtt',label:'Rush Att',short:'RA'},
+        {key:'rushTDs',label:'Rush TDs',short:'RTD'},{key:'fumbles',label:'Fumbles',short:'FUM'},
+        {key:'rec',label:'Receptions',short:'REC'},{key:'recYds',label:'Rec Yds',short:'RYDS'},
+        {key:'recTDs',label:'Rec TDs',short:'RTDS'},{key:'pancakes',label:'Pancakes',short:'PAN'},
+      ],
+      'WR/TE': [
+        {key:'rec',label:'Receptions',short:'REC'},{key:'recYds',label:'Rec Yds',short:'RYDS'},
+        {key:'recTDs',label:'Rec TDs',short:'RTDS'},{key:'rushYds',label:'Rush Yds',short:'RYD'},
+        {key:'rushAtt',label:'Rush Att',short:'RA'},{key:'rushTDs',label:'Rush TDs',short:'RTD'},
+        {key:'fumbles',label:'Fumbles',short:'FUM'},{key:'pancakes',label:'Pancakes',short:'PAN'},
+      ],
+      OL: [
+        {key:'pancakes',label:'Pancakes',short:'PAN'},
+      ],
+      'DL/LB/DB': [
+        {key:'tackles',label:'Tackles',short:'TKL'},{key:'tfl',label:'TFL',short:'TFL'},
+        {key:'sacks',label:'Sacks',short:'SCK'},{key:'ints',label:'Interceptions',short:'INT'},
+        {key:'forcedFumbles',label:'Forced Fumbles',short:'FF'},{key:'fumbleRec',label:'Fumble Rec',short:'FR'},
+        {key:'defTDs',label:'Touchdowns',short:'TD'},
+      ],
+      K: [
+        {key:'fgAtt',label:'FG Att',short:'FGA'},{key:'fgMade',label:'FG Made',short:'FGM'},
+        {key:'xpAtt',label:'XP Att',short:'XPA'},{key:'xpMade',label:'XP Made',short:'XPM'},
+      ],
+    };
+
+    const POSITIONS = Object.keys(POSITION_STATS);
+
+    // Get athletes for selected sport
+    const sportAthletes = athletes.filter(a => a.sport === sportFilter);
+
+    // Get all game stats for selected sport
+    const sportGameStats = gameStats.filter(g => g.sport === sportFilter);
+
+    // Calculate season totals per player
+    const getPlayerSeasonTotals = (athleteId) => {
+      const games = sportGameStats.filter(g => g.athleteId === athleteId);
+      const totals = {};
+      games.forEach(g => {
+        Object.entries(g.stats||{}).forEach(([k,v]) => {
+          totals[k] = (totals[k]||0) + (parseFloat(v)||0);
+        });
+      });
+      // Calculated stats
+      if(totals.passAtt > 0) {
+        totals.compPct = Math.round((totals.passComp||0) / totals.passAtt * 100);
+        totals.ydsPerComp = totals.passComp > 0 ? (totals.passYds / totals.passComp).toFixed(1) : 0;
+        totals.passYdsPerGame = games.length > 0 ? Math.round(totals.passYds / games.length) : 0;
+      }
+      if(totals.rushAtt > 0) {
+        totals.ydsPerRush = (totals.rushYds / totals.rushAtt).toFixed(1);
+        totals.rushYdsPerGame = games.length > 0 ? Math.round(totals.rushYds / games.length) : 0;
+      }
+      if(totals.rec > 0) {
+        totals.ydsPerRec = (totals.recYds / totals.rec).toFixed(1);
+        totals.recYdsPerGame = games.length > 0 ? Math.round(totals.recYds / games.length) : 0;
+      }
+      if(totals.fgAtt > 0) totals.fgPct = Math.round((totals.fgMade||0) / totals.fgAtt * 100);
+      if(totals.xpAtt > 0) totals.xpPct = Math.round((totals.xpMade||0) / totals.xpAtt * 100);
+      return { ...totals, games: games.length };
+    };
+
+    const openStatEntry = (athlete) => {
+      setSelectedPlayer(athlete);
+      setGameRef('');
+      setStatInputs({});
+      setStatModal(true);
+    };
+
+    const saveStats = async () => {
+      if(!gameRef.trim()){notify('Enter a game reference (e.g. "vs Lincoln Apr 5").');return;}
+      setSaving(true);
+      await fdb.add('gameStats', {
+        athleteId: selectedPlayer.id,
+        athleteName: selectedPlayer.name,
+        sport: sportFilter,
+        position: selectedPlayer.position || 'N/A',
+        gameRef,
+        stats: statInputs,
+        enteredBy: user.name,
+      });
+      setSaving(false);
+      setStatModal(false);
+      notify(`Stats saved for ${selectedPlayer.name}!`);
+    };
+
+    const getStatFields = (athlete) => {
+      const pos = athlete.position || '';
+      for(const [group, fields] of Object.entries(POSITION_STATS)) {
+        if(pos.includes(group) || group === pos) return { group, fields };
+      }
+      // Default to position group matching
+      if(['QB'].includes(pos)) return { group:'QB', fields: POSITION_STATS.QB };
+      if(['RB','HB','FB'].includes(pos)) return { group:'RB', fields: POSITION_STATS.RB };
+      if(['WR','TE','WR/TE'].includes(pos)) return { group:'WR/TE', fields: POSITION_STATS['WR/TE'] };
+      if(['OL','LT','LG','C','RG','RT'].includes(pos)) return { group:'OL', fields: POSITION_STATS.OL };
+      if(['DL','DE','DT','LB','MLB','OLB','CB','S','DB','FS','SS'].includes(pos)) return { group:'DL/LB/DB', fields: POSITION_STATS['DL/LB/DB'] };
+      if(['K','P'].includes(pos)) return { group:'K', fields: POSITION_STATS.K };
+      return { group:'DL/LB/DB', fields: POSITION_STATS['DL/LB/DB'] };
+    };
+
+    // Leader for a stat
+    const getLeader = (statKey) => {
+      let best = null, bestVal = -1;
+      sportAthletes.forEach(a => {
+        const totals = getPlayerSeasonTotals(a.id);
+        const val = totals[statKey]||0;
+        if(val > bestVal){ bestVal = val; best = {athlete:a, val}; }
+      });
+      return best;
+    };
+
     return <div>
-      <div style={s.pageHeader}><span style={s.pageTitle}>Statistics</span></div>
-      <StatGrid stats={[{num:schedules.filter(g=>g.badge==='win').length,lbl:'Team Wins'},{num:SPORTS.length,lbl:'Programs'},{num:athletes.length,lbl:'Athletes'}]}/>
-      <Card><CardTitle>Season Leaders</CardTitle>
-        {[{name:'Marcus J.',sport:'Football · QB',stat:'1,840 YDS'},{name:'DeShawn W.',sport:"Men's Basketball",stat:'22.4 PPG'},{name:'Aaliyah M.',sport:"Women's Soccer · F",stat:'14 Goals'},{name:'Jordan B.',sport:'Wrestling',stat:'22–2 Rec.'},{name:'Destiny C.',sport:"Women's Track",stat:'11.8s 100m'}].map(l=><div key={l.name} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'9px 0',borderBottom:`0.5px solid ${G.off}`,fontSize:13}}><div><div style={{fontWeight:600,color:G.black}}>{l.name}</div><div style={{fontSize:11,color:G.muted}}>{l.sport}</div></div><div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:600,color:G.gold}}>{l.stat}</div></div>)}
-      </Card>
+      <div style={s.pageHeader}>
+        <div><span style={s.pageTitle}>Statistics</span></div>
+      </div>
+
+      {/* Sport filter */}
+      <FilterBar cats={['Football',...SPORTS.filter(s=>s.key!=='Football').map(s=>s.key)]} active={sportFilter} onChange={setSportFilter}/>
+
+      {sportFilter === 'Football' ? <>
+        {/* Season leaders strip */}
+        {sportAthletes.length > 0 && <Card style={{marginBottom:12}}>
+          <CardTitle>Season Leaders — {sportFilter}</CardTitle>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8}}>
+            {[
+              {label:'Pass Yds',key:'passYds',suffix:''},
+              {label:'Rush Yds',key:'rushYds',suffix:''},
+              {label:'Rec Yds',key:'recYds',suffix:''},
+              {label:'Pass TDs',key:'passTDs',suffix:''},
+              {label:'Tackles',key:'tackles',suffix:''},
+              {label:'Sacks',key:'sacks',suffix:''},
+            ].map(({label,key,suffix})=>{
+              const leader = getLeader(key);
+              return <div key={key} style={{background:G.off,borderRadius:8,padding:'10px 12px'}}>
+                <div style={{fontSize:10,fontFamily:"'Oswald',sans-serif",letterSpacing:'1px',textTransform:'uppercase',color:G.muted,marginBottom:4}}>{label}</div>
+                {leader ? <>
+                  <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:G.gold}}>{leader.val}{suffix}</div>
+                  <div style={{fontSize:12,color:G.black,fontWeight:500}}>{leader.athlete.name}</div>
+                </> : <div style={{fontSize:13,color:G.muted}}>No data</div>}
+              </div>;
+            })}
+          </div>
+        </Card>}
+
+        {/* Player stat cards */}
+        {POSITIONS.map(pos => {
+          const posAthletes = sportAthletes.filter(a => {
+            const p = a.position||'';
+            if(pos==='QB') return p==='QB';
+            if(pos==='RB') return ['RB','HB','FB'].includes(p);
+            if(pos==='WR/TE') return ['WR','TE'].includes(p);
+            if(pos==='OL') return ['OL','LT','LG','C','RG','RT'].includes(p);
+            if(pos==='DL/LB/DB') return ['DL','DE','DT','LB','MLB','OLB','CB','S','DB','FS','SS'].includes(p);
+            if(pos==='K') return ['K','P'].includes(p);
+            return false;
+          });
+          if(posAthletes.length===0) return null;
+          const fields = POSITION_STATS[pos];
+          return <Card key={pos} style={{marginBottom:12}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
+              <CardTitle style={{margin:0}}>{pos}</CardTitle>
+            </div>
+            <div style={{overflowX:'auto'}}>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,minWidth:400}}>
+                <thead>
+                  <tr>
+                    <th style={{fontFamily:"'Oswald',sans-serif",fontSize:10,fontWeight:500,letterSpacing:'1px',textTransform:'uppercase',color:G.muted,textAlign:'left',padding:'6px 8px',borderBottom:`1px solid ${G.off}`,whiteSpace:'nowrap'}}>Player</th>
+                    <th style={{fontFamily:"'Oswald',sans-serif",fontSize:10,fontWeight:500,letterSpacing:'1px',textTransform:'uppercase',color:G.muted,textAlign:'center',padding:'6px 8px',borderBottom:`1px solid ${G.off}`}}>GP</th>
+                    {fields.map(f=><th key={f.key} style={{fontFamily:"'Oswald',sans-serif",fontSize:10,fontWeight:500,letterSpacing:'1px',textTransform:'uppercase',color:G.muted,textAlign:'center',padding:'6px 8px',borderBottom:`1px solid ${G.off}`,whiteSpace:'nowrap'}}>{f.short}</th>)}
+                    {canEdit&&<th style={{borderBottom:`1px solid ${G.off}`,padding:'6px 8px'}}></th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {posAthletes.map(a=>{
+                    const totals = getPlayerSeasonTotals(a.id);
+                    return <tr key={a.id} onClick={()=>setViewPlayer(viewPlayer?.id===a.id?null:a)} style={{cursor:'pointer',background:viewPlayer?.id===a.id?G.goldPale:'transparent'}}>
+                      <td style={{padding:'9px 8px',fontWeight:600,color:G.black,fontSize:13}}>
+                        <div>{a.name}</div>
+                        <div style={{fontSize:10,color:G.muted}}>#{a.jersey||'—'}</div>
+                      </td>
+                      <td style={{padding:'9px 8px',textAlign:'center',color:G.muted,fontSize:12}}>{totals.games||0}</td>
+                      {fields.map(f=><td key={f.key} style={{padding:'9px 8px',textAlign:'center',fontFamily:"'Oswald',sans-serif",fontSize:13,fontWeight:totals[f.key]>0?600:400,color:totals[f.key]>0?G.black:G.muted}}>{totals[f.key]||0}</td>)}
+                      {canEdit&&<td style={{padding:'9px 8px',textAlign:'center'}}>
+                        <button onClick={e=>{e.stopPropagation();openStatEntry(a);}} style={{background:G.black,color:G.gold,border:'none',borderRadius:6,padding:'4px 10px',fontFamily:"'Oswald',sans-serif",fontSize:10,letterSpacing:'1px',cursor:'pointer'}}>+ Stats</button>
+                      </td>}
+                    </tr>;
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Per-game breakdown when player is selected */}
+            {viewPlayer && posAthletes.find(a=>a.id===viewPlayer.id) && <div style={{marginTop:12,borderTop:`0.5px solid ${G.off}`,paddingTop:12}}>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:12,fontWeight:600,letterSpacing:'1px',textTransform:'uppercase',color:G.muted,marginBottom:8}}>{viewPlayer.name} — Game Log</div>
+              {sportGameStats.filter(g=>g.athleteId===viewPlayer.id).length===0
+                ? <div style={{fontSize:13,color:G.muted}}>No game stats entered yet.</div>
+                : sportGameStats.filter(g=>g.athleteId===viewPlayer.id).map(g=><div key={g.id} style={{display:'flex',alignItems:'center',gap:8,padding:'7px 0',borderBottom:`0.5px solid ${G.off}`,fontSize:12}}>
+                    <div style={{fontWeight:600,color:G.black,minWidth:120}}>{g.gameRef}</div>
+                    <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                      {Object.entries(g.stats||{}).filter(([,v])=>parseFloat(v)>0).map(([k,v])=>{
+                        const field = fields.find(f=>f.key===k);
+                        return field ? <span key={k} style={{fontSize:11,background:G.off,borderRadius:4,padding:'2px 6px'}}><span style={{color:G.muted}}>{field.short}: </span><span style={{fontWeight:600,color:G.black}}>{v}</span></span> : null;
+                      })}
+                    </div>
+                  </div>)
+              }
+            </div>}
+          </Card>;
+        })}
+
+        {sportAthletes.length===0&&<Card><Empty msg={`No athletes on the ${sportFilter} roster yet.`}/></Card>}
+
+      </> : <Card><div style={{color:G.muted,fontSize:13,padding:'8px 0'}}>Stats for {sportFilter} coming soon. Select Football to view current stats.</div></Card>}
+
+      {/* Add stats modal */}
+      {statModal&&selectedPlayer&&<Modal title={`Enter Stats — ${selectedPlayer.name}`} onClose={()=>setStatModal(false)}>
+        <div style={{marginBottom:12}}>
+          <label style={s.label}>Game Reference</label>
+          <input style={s.input} placeholder="e.g. vs Lincoln Apr 5" value={gameRef} onChange={e=>setGameRef(e.target.value)}/>
+        </div>
+        <div style={{marginBottom:16}}>
+          <label style={s.label}>Position</label>
+          <select style={s.input} value={selectedPlayer.position||''} onChange={e=>{
+            updateDoc(doc(db,'users',selectedPlayer.id),{position:e.target.value});
+            setSelectedPlayer(p=>({...p,position:e.target.value}));
+          }}>
+            <option value="">Select position...</option>
+            {['QB','RB','HB','FB','WR','TE','OL','LT','LG','C','RG','RT','DL','DE','DT','LB','MLB','OLB','CB','S','DB','FS','SS','K','P'].map(p=><option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}}>
+          {getStatFields(selectedPlayer).fields.map(f=><div key={f.key}>
+            <label style={s.label}>{f.label}</label>
+            <input style={s.input} type="number" min="0" placeholder="0" value={statInputs[f.key]||''} onChange={e=>setStatInputs(x=>({...x,[f.key]:e.target.value}))}/>
+          </div>)}
+        </div>
+        <div style={{display:'flex',gap:8}}>
+          <Btn variant="primary" onClick={saveStats} disabled={saving}>{saving?'Saving...':'Save Stats'}</Btn>
+          <Btn variant="outline" onClick={()=>setStatModal(false)}>Cancel</Btn>
+        </div>
+      </Modal>}
     </div>;
   }
 
