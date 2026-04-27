@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { initializeApp } from "firebase/app";
 
 // ─── GOOGLE PLACES AUTOCOMPLETE ───────────────────────────────────────────────
-const GOOGLE_PLACES_KEY = "AIzaSyB--lmmPax6pMWaLxeF9QZG9ICw8iVJ7fo";
+const GOOGLE_PLACES_KEY = import.meta.env.VITE_GOOGLE_PLACES_KEY;
 
 let googlePlacesLoading = false;
 let googlePlacesLoaded = false;
@@ -105,12 +105,12 @@ import {
 
 // ─── FIREBASE CONFIG ──────────────────────────────────────────────────────────
 const firebaseConfig = {
-  apiKey: "AIzaSyB--lmmPax6pMWaLxeF9QZG9ICw8iVJ7fo",
-  authDomain: "pinkston-vikings.firebaseapp.com",
-  projectId: "pinkston-vikings",
-  storageBucket: "pinkston-vikings.firebasestorage.app",
-  messagingSenderId: "745116012580",
-  appId: "1:745116012580:web:524e7ccecb9e81c33c88b1"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 const firebaseApp = initializeApp(firebaseConfig);
